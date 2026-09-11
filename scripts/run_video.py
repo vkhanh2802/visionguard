@@ -3,11 +3,11 @@ from pathlib import Path
 
 import cv2
 
-from src.detection import YOLODetector
+from src.tracking import YOLOByteTracker
 from src.fps_meter import FPSMeter
 from src.video import create_video_writer
-from src.visualization import draw_detections, draw_fps
-
+from src.visualization import draw_tracks, draw_fps, draw_trajectories
+from src.tracking.history import TrackHistory
 
 TARGET_CLASSES = {"person", "car", "motorcycle", "bus", "truck"}
 
@@ -31,7 +31,7 @@ def main() -> None:
     if not source.exists():
         raise FileNotFoundError(f"Video does not exist: {source}")
 
-    detector = YOLODetector(model_path=args.model, confidence=args.conf, target_classes=TARGET_CLASSES)
+    tracker = YOLOByteTracker(model_path=args.model, confidence=args.conf, target_classes=TARGET_CLASSES)
     cap = cv2.VideoCapture(str(source))
 
     if not cap.isOpened():
@@ -44,7 +44,7 @@ def main() -> None:
 
     writer = create_video_writer(output, source_fps, width, height)
     fps_meter = FPSMeter()
-
+    track_history = TrackHistory(max_length=30)  # Store the last 30 positions for each track
     print(f"Input: {source}")
     print(f"Resolution: {width}x{height}")
     print(f"Source FPS: {source_fps:.2f}")
@@ -60,11 +60,13 @@ def main() -> None:
                 break
 
             fps_meter.start()
-            detections = detector.detect(frame)
+            tracks = tracker.track(frame)
+            track_history.update(tracks)
             processing_fps = fps_meter.stop()
 
-            draw_detections(frame, detections)
+            draw_tracks(frame, tracks)
             draw_fps(frame, processing_fps)
+            draw_trajectories(frame, tracks, track_history)
 
             writer.write(frame)
             processed_frames += 1
