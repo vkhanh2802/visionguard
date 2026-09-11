@@ -1,3 +1,7 @@
+from math import hypot
+
+Point = tuple[int, int]  # (x, y)
+
 def calculate_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
     ax1, ay1, ax2, ay2 = box_a
     bx1, by1, bx2, by2 = box_b
@@ -18,7 +22,6 @@ def calculate_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, 
 
     return intersection_area / union_area if union_area > 0 else 0.0
 
-Point = tuple[int, int]  # (x, y)
 
 def side_of_line(point: Point, line_start: Point, line_end: Point) -> float:
     px, py = point
@@ -26,24 +29,56 @@ def side_of_line(point: Point, line_start: Point, line_end: Point) -> float:
     x2, y2 = line_end
     return (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
 
-def classify_side(value: float, epsilon: float = 1.0) ->int:
-    if value > epsilon:
-        return 1  # Point is on one side of the line
-    elif value < -epsilon:
-        return -1  # Point is on the other side of the line
-    return 0  # Point is on the line (within epsilon)
+def classify_side(distance: float, dead_zone_px: float = 5.0) -> int:
+    if distance > dead_zone_px:
+        return 1
+
+    if distance < -dead_zone_px:
+        return -1
+    return 0
 
 def segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool:
-    side_c = side_of_line(c, a, b)
-    side_d = side_of_line(d, a, b)
-    side_a = side_of_line(a, c, d)
-    side_b = side_of_line(b, c, d)
+    ab_c = side_of_line(c, a, b)
+    ab_d = side_of_line(d, a, b)
+    cd_a = side_of_line(a, c, d)
+    cd_b = side_of_line(b, c, d)
 
-    return side_c * side_d <= 0 and side_a * side_b <= 0
+    if ab_c * ab_d < 0 and cd_a * cd_b < 0:
+        return True
 
-def has_crossed_line(previous_point: Point, current_point: Point, line_start: Point, line_end: Point, epsilon: float = 1.0) -> bool:
-    previous_side = classify_side(side_of_line(previous_point, line_start, line_end), epsilon)
-    current_side = classify_side(side_of_line(current_point, line_start, line_end), epsilon)
+    if ab_c == 0 and point_on_segment(c, a, b):
+        return True
+
+    if ab_d == 0 and point_on_segment(d, a, b):
+        return True
+
+    if cd_a == 0 and point_on_segment(a, c, d):
+        return True
+
+    if cd_b == 0 and point_on_segment(b, c, d):
+        return True
+
+    return False
+
+def point_on_segment(point: Point, start: Point, end: Point) -> bool:
+    px, py = point
+    x1, y1 = start
+    x2, y2 = end
+
+    return min(x1, x2) <= px <= max(x1, x2) and min(y1, y2) <= py <= max(y1, y2)
+
+def has_crossed_line(
+    previous_point: Point,
+    current_point: Point,
+    line_start: Point,
+    line_end: Point,
+    dead_zone_px: float = 5.0,
+) -> bool:
+    previous_distance = signed_distance_to_line(previous_point, line_start, line_end)
+    current_distance = signed_distance_to_line(current_point, line_start, line_end)
+
+    previous_side = classify_side(previous_distance, dead_zone_px)
+    current_side = classify_side(current_distance, dead_zone_px)
 
     if previous_side == 0 or current_side == 0:
         return False
@@ -52,4 +87,17 @@ def has_crossed_line(previous_point: Point, current_point: Point, line_start: Po
         return False
 
     return segments_intersect(previous_point, current_point, line_start, line_end)
+
+def signed_distance_to_line(point: Point, line_start: Point, line_end: Point) -> float:
+    x1, y1 = line_start
+    x2, y2 = line_end
+
+    dx = x2 - x1
+    dy = y2 - y1
+    line_length = hypot(dx, dy)
+
+    if line_length == 0:
+        raise ValueError("line_start and line_end must be different points.")
+
+    return side_of_line(point, line_start, line_end) / line_length
 
