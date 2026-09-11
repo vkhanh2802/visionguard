@@ -1,5 +1,5 @@
 from src.tracking import Track
-from src.utils.geometry import classify_side, has_crossed_line, side_of_line
+from src.utils.geometry import classify_side, has_crossed_line, signed_distance_to_line
 
 from .types import Event
 
@@ -8,7 +8,7 @@ class LineCrossingEngine:
         self,
         line_start: tuple[int, int],
         line_end: tuple[int, int],
-        epsilon: float = 1.0,
+        dead_zone_px: float = 5.0,
         max_missing_frames: int = 30,
         negative_to_positive: str = "IN",
         positive_to_negative: str = "OUT",
@@ -16,9 +16,18 @@ class LineCrossingEngine:
         if line_start == line_end:
             raise ValueError("line_start and line_end must be different points.")
 
+        if dead_zone_px < 0:
+            raise ValueError("dead_zone_px must be non-negative.")
+
+        if max_missing_frames < 0:
+            raise ValueError("max_missing_frames must be non-negative.")
+
+        if {negative_to_positive, positive_to_negative} != {"IN", "OUT"}:
+            raise ValueError("Directions must contain exactly IN and OUT.")
+
         self.line_start = line_start
         self.line_end = line_end
-        self.epsilon = epsilon
+        self.dead_zone_px = dead_zone_px
         self.max_missing_frames = max_missing_frames
         self.negative_to_positive = negative_to_positive
         self.positive_to_negative = positive_to_negative
@@ -70,8 +79,8 @@ class LineCrossingEngine:
 
             self.last_seen_frame[track_id] = frame_id
 
-            side_value = side_of_line(point, self.line_start, self.line_end)
-            current_side = classify_side(side_value, self.epsilon)
+            distance = signed_distance_to_line(point, self.line_start, self.line_end)
+            current_side = classify_side(distance, self.dead_zone_px)
 
             if current_side == 0:
                 continue
@@ -88,25 +97,17 @@ class LineCrossingEngine:
                 self.last_stable_point[track_id] = point
                 continue
 
-            crossed = has_crossed_line(
-                previous_point,
-                point,
-                self.line_start,
-                self.line_end,
-                self.epsilon,
-            )
-
-            if crossed:
+            if has_crossed_line(previous_point, point, self.line_start, self.line_end, self.dead_zone_px):
                 direction = self._get_direction(previous_side, current_side)
-                event = Event(
-                    event_type="line_crossing",
-                    track_id=track_id,
-                    direction=direction,
-                    timestamp=timestamp,
-                    position=point,
+                events.append(
+                    Event(
+                        event_type="line_crossing",
+                        track_id=track_id,
+                        direction=direction,
+                        timestamp=timestamp,
+                        position=point,
+                    )
                 )
-
-                events.append(event)
                 self._update_count(direction)
 
             self.last_stable_side[track_id] = current_side
