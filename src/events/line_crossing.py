@@ -58,6 +58,10 @@ class LineCrossingEngine:
     def total_count(self) -> int:
         return self.in_count + self.out_count
 
+    @property
+    def net_count(self) -> int:
+        return self.in_count - self.out_count
+
     def _cleanup_stale_tracks(self, frame_id: int) -> None:
         stale_ids = [
             track_id

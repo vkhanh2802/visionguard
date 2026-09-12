@@ -9,7 +9,14 @@ from src.video import create_video_writer
 from src.visualization import draw_tracks, draw_fps, draw_trajectories
 from src.tracking.history import TrackHistory
 
-TARGET_CLASSES = {"person", "car", "motorcycle", "bus", "truck"}
+from src.events import LineCrossingEngine
+from src.visualization import draw_counts, draw_fps, draw_line_crossing, draw_line_directions, draw_tracks, draw_trajectories
+
+LINE_START = (100, 300)
+LINE_END = (860, 300)
+DEAD_ZONE_PX = 8
+
+TARGET_CLASSES = {"person"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,12 +52,18 @@ def main() -> None:
     writer = create_video_writer(output, source_fps, width, height)
     fps_meter = FPSMeter()
     track_history = TrackHistory(max_length=30)  # Store the last 30 positions for each track
+    line_crossing_engine = LineCrossingEngine(
+        line_start = LINE_START, 
+        line_end = LINE_END, 
+        dead_zone_px = DEAD_ZONE_PX,
+        max_missing_frames = 30
+    )
     print(f"Input: {source}")
     print(f"Resolution: {width}x{height}")
     print(f"Source FPS: {source_fps:.2f}")
     print(f"Frames: {frame_count}")
 
-    processed_frames = 0
+    frame_id = 0
 
     try:
         while True:
@@ -62,14 +75,27 @@ def main() -> None:
             fps_meter.start()
             tracks = tracker.track(frame)
             track_history.update(tracks)
-            processing_fps = fps_meter.stop()
+
+            timestamp = frame_id / source_fps if source_fps > 0 else 0.0
+            events = line_crossing_engine.process(tracks, frame_id=frame_id, timestamp=timestamp)
+
+            tracking_fps = fps_meter.stop()
+
+            for event in events:
+                print(f"[{event.timestamp:7.2f}s] Track #{event.track_id} {event.direction} at {event.position}")
+
+            
+
 
             draw_tracks(frame, tracks)
-            draw_fps(frame, processing_fps)
+            draw_fps(frame, tracking_fps)
             draw_trajectories(frame, tracks, track_history)
+            draw_line_crossing(frame, line_crossing_engine)
+            draw_line_directions(frame, line_crossing_engine)
+            draw_counts(frame, line_crossing_engine)
 
             writer.write(frame)
-            processed_frames += 1
+            frame_id += 1
 
             if not args.no_display:
                 cv2.imshow("VisionGuard", frame)
@@ -81,8 +107,14 @@ def main() -> None:
         writer.release()
         cv2.destroyAllWindows()
 
-    print(f"Processed frames: {processed_frames}")
-    print(f"Processing FPS: {fps_meter.fps:.2f}")
+    print()
+    print("Processing completed")
+    print(f"Frames: {frame_id}")
+    print(f"Tracking FPS: {fps_meter.fps:.2f}")
+    print(f"IN: {line_crossing_engine.in_count}")
+    print(f"OUT: {line_crossing_engine.out_count}")
+    print(f"NET: {line_crossing_engine.net_count}")
+    print(f"Total crossings: {line_crossing_engine.total_count}")
     print(f"Output: {output}")
 
 
