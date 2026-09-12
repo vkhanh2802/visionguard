@@ -75,7 +75,7 @@ def test_track_can_cross_in_then_out():
     assert engine.total_count == 2
 
 def test_dead_zone_preserves_last_stable_side():
-    engine = LineCrossingEngine((0, 0), (10, 0), epsilon=1.0)
+    engine = LineCrossingEngine((0, 0), (10, 0), dead_zone_px=1.0)
 
     engine.process([make_track(1, (5, -5))], 1, 0.0)
 
