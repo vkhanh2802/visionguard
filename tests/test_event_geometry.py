@@ -173,10 +173,16 @@ def test_track_can_cross_in_out_and_in_again():
     engine = LineCrossingEngine((0, 100), (200, 100), dead_zone_px=5)
 
     positions = [
-        (100, 80),
-        (100, 120),
-        (100, 80),
-        (100, 120),
+    (100, 80),
+
+    (100, 120),
+    (100, 125),
+
+    (100, 80),
+    (100, 75),
+
+    (100, 120),
+    (100, 125),
     ]
 
     directions = []

@@ -10,6 +10,7 @@ class LineCrossingEngine:
         line_end: tuple[int, int],
         dead_zone_px: float = 5.0,
         max_missing_frames: int = 30,
+        confirmation_frames: int = 2,
         negative_to_positive: str = "IN",
         positive_to_negative: str = "OUT",
     ):
@@ -18,7 +19,9 @@ class LineCrossingEngine:
 
         if dead_zone_px < 0:
             raise ValueError("dead_zone_px must be non-negative.")
-
+        if confirmation_frames < 1:
+            raise ValueError("confirmation_frames must be at least 1.")
+        
         if max_missing_frames < 0:
             raise ValueError("max_missing_frames must be non-negative.")
 
@@ -29,12 +32,17 @@ class LineCrossingEngine:
         self.line_end = line_end
         self.dead_zone_px = dead_zone_px
         self.max_missing_frames = max_missing_frames
+        self.confirmation_frames = confirmation_frames
         self.negative_to_positive = negative_to_positive
         self.positive_to_negative = positive_to_negative
 
         self.last_stable_side: dict[int, int] = {}
         self.last_stable_point: dict[int, tuple[int, int]] = {}
         self.last_seen_frame: dict[int, int] = {}
+
+        self.pending_side: dict[int, int] = {}
+        self.pending_count: dict[int, int] = {}
+        self.pending_point: dict[int, tuple[int, int]] = {}
 
         self.in_count = 0
         self.out_count = 0
@@ -62,6 +70,11 @@ class LineCrossingEngine:
     def net_count(self) -> int:
         return self.in_count - self.out_count
 
+    def _clear_pending(self, track_id: int) -> None:
+        self.pending_side.pop(track_id, None)
+        self.pending_count.pop(track_id, None)
+        self.pending_point.pop(track_id, None)
+
     def _cleanup_stale_tracks(self, frame_id: int) -> None:
         stale_ids = [
             track_id
@@ -73,6 +86,9 @@ class LineCrossingEngine:
             self.last_seen_frame.pop(track_id, None)
             self.last_stable_side.pop(track_id, None)
             self.last_stable_point.pop(track_id, None)
+            self.pending_side.pop(track_id, None)
+            self.pending_count.pop(track_id, None)
+            self.pending_point.pop(track_id, None)
 
     def process(self, tracks: list[Track], frame_id: int, timestamp: float) -> list[Event]:
         events = []
@@ -94,15 +110,29 @@ class LineCrossingEngine:
                 self.last_stable_point[track_id] = point
                 continue
 
-            previous_side = self.last_stable_side[track_id]
-            previous_point = self.last_stable_point[track_id]
+            stable_side = self.last_stable_side[track_id]
 
-            if current_side == previous_side:
+            if current_side == stable_side:
                 self.last_stable_point[track_id] = point
+                self._clear_pending(track_id)
                 continue
 
+            if self.pending_side.get(track_id) != current_side:
+                self.pending_side[track_id] = current_side
+                self.pending_count[track_id] = 1
+                self.pending_point[track_id] = point
+                continue
+
+            self.pending_count[track_id] += 1
+            self.pending_point[track_id] = point
+
+            if self.pending_count[track_id] < self.confirmation_frames:
+                continue
+
+            previous_point = self.last_stable_point[track_id]
+
             if has_crossed_line(previous_point, point, self.line_start, self.line_end, self.dead_zone_px):
-                direction = self._get_direction(previous_side, current_side)
+                direction = self._get_direction(stable_side, current_side)
                 events.append(
                     Event(
                         event_type="line_crossing",
@@ -116,6 +146,7 @@ class LineCrossingEngine:
 
             self.last_stable_side[track_id] = current_side
             self.last_stable_point[track_id] = point
+            self._clear_pending(track_id)
 
         self._cleanup_stale_tracks(frame_id)
 

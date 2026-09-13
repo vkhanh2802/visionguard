@@ -132,3 +132,20 @@ def test_stale_track_state_is_removed():
     events = engine.process([make_track(1, (5, 5))], 5, 0.4)
 
     assert events == []
+
+def test_single_frame_side_jitter_does_not_create_event():
+    engine = LineCrossingEngine((0, 100), (200, 100), dead_zone_px=5, confirmation_frames=2)
+
+    positions = [
+        (100, 80),
+        (100, 120),
+        (100, 80),
+    ]
+
+    all_events = []
+
+    for frame_id, point in enumerate(positions, start=1):
+        all_events.extend(engine.process([make_track(1, point)], frame_id, frame_id / 30))
+
+    assert all_events == []
+    assert engine.total_count == 0

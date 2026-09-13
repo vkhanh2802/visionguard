@@ -12,10 +12,10 @@ from src.tracking.history import TrackHistory
 from src.events import LineCrossingEngine
 from src.visualization import draw_counts, draw_fps, draw_line_crossing, draw_line_directions, draw_tracks, draw_trajectories
 
-LINE_START = (50, 300)
-LINE_END = (750, 300)
-DEAD_ZONE_PX = 10
-
+LINE_START =  (50, 400)
+LINE_END = (1850, 400)
+DEAD_ZONE_PX = 5
+CONFIRMATION_FRAMES = 5
 TARGET_CLASSES = {"person"}
 
 
@@ -56,7 +56,8 @@ def main() -> None:
         line_start = LINE_START, 
         line_end = LINE_END, 
         dead_zone_px = DEAD_ZONE_PX,
-        max_missing_frames = 30
+        max_missing_frames = 30,
+        confirmation_frames = CONFIRMATION_FRAMES,
     )
     print(f"Input: {source}")
     print(f"Resolution: {width}x{height}")
