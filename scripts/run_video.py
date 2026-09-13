@@ -12,9 +12,9 @@ from src.tracking.history import TrackHistory
 from src.events import LineCrossingEngine
 from src.visualization import draw_counts, draw_fps, draw_line_crossing, draw_line_directions, draw_tracks, draw_trajectories
 
-LINE_START = (100, 300)
-LINE_END = (860, 300)
-DEAD_ZONE_PX = 8
+LINE_START = (50, 300)
+LINE_END = (750, 300)
+DEAD_ZONE_PX = 10
 
 TARGET_CLASSES = {"person"}
 
@@ -98,7 +98,7 @@ def main() -> None:
             frame_id += 1
 
             if not args.no_display:
-                cv2.imshow("VisionGuard", frame)
+                cv2.imshow("VisionGuard", frame) 
 
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
