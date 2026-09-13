@@ -1,4 +1,4 @@
-from src.tracking import Track
+from src.tracking.types import Track
 from src.utils.geometry import classify_side, has_crossed_line, signed_distance_to_line
 
 from .types import Event
@@ -8,9 +8,9 @@ class LineCrossingEngine:
         self,
         line_start: tuple[int, int],
         line_end: tuple[int, int],
-        dead_zone_px: float = 5.0,
+        dead_zone_px: float = 0.0,
         max_missing_frames: int = 30,
-        confirmation_frames: int = 2,
+        confirmation_frames: int = 1,
         negative_to_positive: str = "IN",
         positive_to_negative: str = "OUT",
     ):
@@ -121,10 +121,9 @@ class LineCrossingEngine:
                 self.pending_side[track_id] = current_side
                 self.pending_count[track_id] = 1
                 self.pending_point[track_id] = point
-                continue
-
-            self.pending_count[track_id] += 1
-            self.pending_point[track_id] = point
+            else:
+                self.pending_count[track_id] += 1
+                self.pending_point[track_id] = point
 
             if self.pending_count[track_id] < self.confirmation_frames:
                 continue

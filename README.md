@@ -28,7 +28,30 @@ Week 2 completed:
 
 ## Pipeline
 
-Video -> OpenCV -> YOLO26 -> Tracking -> Visualization -> Output
+```text
+Video
+  |
+  v
+YOLO
+  |
+  v
+ByteTrack
+  |
+  v
+Track[]
+  |
+  v
+LineCrossingEngine
+  |
+  v
+Event[]
+  |
+  v
+IN / OUT Counters
+  |
+  v
+Visualization
+```
 
 ## Installation
 
@@ -74,15 +97,30 @@ In this experiment, `conf=0.4` provided a better balance between detection cover
 
 Therefore, `0.4` is currently used as the default detection confidence threshold for VisionGuard. This value is treated as a scene-dependent hyperparameter rather than a universal optimal threshold and may be adjusted for different camera conditions or datasets.
 
+## Week 3 - Line Crossing & People Counting
+
+Implemented:
+
+- Virtual line crossing detection
+- IN / OUT direction classification
+- Finite line-segment intersection
+- Pixel-based dead zone
+- Bottom-center based crossing geometry
+- Stateful crossing detection
+- Multi-frame side confirmation
+- Track state cleanup
+- IN / OUT / NET counters
+- Unit tests for geometry and event state
+
 ## Line Crossing Evaluation
 
 The line-crossing system was evaluated on three videos with increasing levels of difficulty:
 
-| Video | Scenario                                                     | Ground Truth IN | Ground Truth OUT |
-| ----- | ------------------------------------------------------------ | --------------: | ---------------: |
-| A     | Simple scene, few people, low occlusion                      |               2 |                4 |
-| B     | Medium scene, more people, turn-backs and near-line movement |               8 |                5 |
-| C     | Crowded scene with occlusion and unstable tracking           |               2 |               12 |
+| Video | Scenario | Ground Truth IN | Ground Truth OUT |
+| ----- | -------- | --------------: | ---------------: |
+| A | Simple scene, few people, low occlusion | 2 | 4 |
+| B | Medium scene, more people, turn-backs and near-line movement | 8 | 5 |
+| C | Crowded scene with occlusion and unstable tracking | 2 | 12 |
 
 ### Dead-Zone Experiment
 
@@ -92,10 +130,10 @@ A pixel-based dead zone was evaluated to reduce false crossing events caused by 
 
 | Dead Zone | Predicted IN | Predicted OUT | False Events | Missed Events |
 | --------: | -----------: | ------------: | -----------: | ------------: |
-|      3 px |            2 |             3 |            0 |             1 |
-|      5 px |            2 |             3 |            0 |             1 |
-|      8 px |            2 |             3 |            0 |             1 |
-|     10 px |            2 |             3 |            0 |             1 |
+| 3 px | 2 | 3 | 0 | 1 |
+| 5 px | 2 | 3 | 0 | 1 |
+| 8 px | 2 | 3 | 0 | 1 |
+| 10 px | 2 | 3 | 0 | 1 |
 
 The missed event was caused by two people moving very close together, resulting in the detector producing one bounding box instead of two separate detections.
 
@@ -103,10 +141,10 @@ The missed event was caused by two people moving very close together, resulting 
 
 | Dead Zone | Predicted IN | Predicted OUT | False Events | Missed Events |
 | --------: | -----------: | ------------: | -----------: | ------------: |
-|      3 px |            7 |             4 |            0 |             2 |
-|      5 px |            7 |             4 |            0 |             2 |
-|      8 px |            6 |             4 |            0 |             3 |
-|     10 px |            5 |             4 |            0 |             4 |
+| 3 px | 7 | 4 | 0 | 2 |
+| 5 px | 7 | 4 | 0 | 2 |
+| 8 px | 6 | 4 | 0 | 3 |
+| 10 px | 5 | 4 | 0 | 4 |
 
 One missed event was caused by overlapping bounding boxes. Other missed events were observed when tracking became unstable or temporarily disappeared near the virtual line.
 
@@ -116,10 +154,10 @@ Increasing the dead zone beyond 5 pixels also increased the number of missed cro
 
 | Dead Zone | Predicted IN | Predicted OUT | False Events | Missed Events |
 | --------: | -----------: | ------------: | -----------: | ------------: |
-|      3 px |            5 |            13 |            8 |             4 |
-|      5 px |            3 |            12 |            5 |             4 |
-|      8 px |            2 |            11 |            3 |             4 |
-|     10 px |            2 |            11 |            3 |             4 |
+| 3 px | 5 | 13 | 8 | 4 |
+| 5 px | 3 | 12 | 5 | 4 |
+| 8 px | 2 | 11 | 3 | 4 |
+| 10 px | 2 | 11 | 3 | 4 |
 
 The crowded scene produced significantly more false crossing events. These were mainly caused by bounding-box positions oscillating around the virtual line.
 
@@ -129,19 +167,19 @@ The remaining missed events were mainly caused by overlapping bounding boxes and
 
 ### Failure Analysis
 
-| Failure                       | Observed Cause                              | Pipeline Layer   |
-| ----------------------------- | ------------------------------------------- | ---------------- |
-| Two people counted as one     | Nearby people merged into one bounding box  | Detection        |
-| Missed crossing               | Overlapping bounding boxes                  | Detection        |
-| Missed crossing near the line | Track temporarily lost or fragmented        | Tracking         |
-| Duplicate / false crossing    | Bounding-box jitter around the virtual line | Tracking / Event |
-| New identity after occlusion  | ByteTrack assigns a new track ID            | Tracking         |
+| Failure | Observed Cause | Pipeline Layer |
+| ------- | -------------- | -------------- |
+| Two people counted as one | Nearby people merged into one bounding box | Detection |
+| Missed crossing | Overlapping bounding boxes | Detection |
+| Missed crossing near the line | Track temporarily lost or fragmented | Tracking |
+| Duplicate / false crossing | Bounding-box jitter around the virtual line | Tracking / Event |
+| New identity after occlusion | ByteTrack assigns a new track ID | Tracking |
 
 ### Conclusion
 
 The experiments show that the line-crossing dead zone provides a trade-off between false-event suppression and crossing recall.
 
-A small dead zone such as `3 px` is more sensitive to bounding-box jitter, especially in crowded scenes. Increasing the dead zone reduces false crossings, but overly large values such as `8–10 px` can cause valid crossings to be missed.
+A small dead zone such as `3 px` is more sensitive to bounding-box jitter, especially in crowded scenes. Increasing the dead zone reduces false crossings, but overly large values such as `8-10 px` can cause valid crossings to be missed.
 
 Based on the three evaluated videos, VisionGuard currently uses:
 
@@ -156,9 +194,56 @@ The experiments also show that many remaining counting errors originate upstream
 
 ### Current Limitations
 
-* Counting accuracy depends on stable object detection and tracking.
-* Closely overlapping people may be merged into a single bounding box.
-* Long or heavy occlusion can cause track loss or ID reassignment.
-* Bounding-box jitter near the virtual line can still produce false events in crowded scenes.
-* The virtual line and dead-zone threshold currently require manual configuration for each camera.
-* The current geometry operates in image coordinates and does not compensate for perspective distortion.
+- Counting accuracy depends on stable object detection and tracking.
+- Closely overlapping people may be merged into a single bounding box.
+- Long or heavy occlusion can cause track loss or ID reassignment.
+- Bounding-box jitter near the virtual line can still produce false events in crowded scenes.
+- The virtual line and dead-zone threshold currently require manual configuration for each camera.
+- The current geometry operates in image coordinates and does not compensate for perspective distortion.
+
+### Side Confirmation Experiment
+
+To further reduce false crossing events caused by bounding-box oscillation around the virtual line, a side-confirmation mechanism was evaluated on the crowded test video.
+
+A crossing transition is accepted only when a track remains on the new side of the virtual line for a specified number of consecutive frames.
+
+| Confirmation Frames | Predicted IN | Predicted OUT | False Events | Missed Events |
+| ------------------: | -----------: | ------------: | -----------: | ------------: |
+| 1 | 3 | 11 | 4 | 4 |
+| 2 | 3 | 11 | 4 | 4 |
+| 3 | 2 | 10 | 2 | 4 |
+| 5 | 2 | 10 | 2 | 4 |
+
+Increasing the confirmation requirement from 1 to 3 frames reduced false crossing events from 4 to 2 without increasing the number of missed crossings.
+
+Using 5 confirmation frames did not provide any additional improvement compared with 3 frames and would introduce additional event latency.
+
+Therefore, VisionGuard currently uses:
+
+- Detection confidence: `0.4`
+- Line dead zone: `5 px`
+- Side confirmation: `3 frames`
+
+The confirmation mechanism is particularly useful in crowded scenes where bounding-box positions can oscillate around the virtual line for several consecutive frames.
+
+### Remaining Failure Cases
+
+After applying a 5-pixel dead zone and 3-frame side confirmation, false crossing events were reduced significantly.
+
+The remaining errors were mainly associated with upstream computer-vision failures:
+
+- Overlapping people producing unstable or merged bounding boxes
+- Temporary loss of tracks near the virtual line
+- ID fragmentation after occlusion
+- Prolonged bounding-box instability in crowded areas
+
+These errors cannot be fully corrected by the line-crossing state machine alone because the event engine depends on the quality and identity consistency of upstream tracks.
+
+### Final Week 3 Configuration
+
+- Detection confidence: `0.4`
+- Dead zone: `5 px`
+- Side confirmation: `3 frames`
+- Maximum missing frames: `30`
+
+These values were selected empirically on three videos with different levels of crowding and occlusion.

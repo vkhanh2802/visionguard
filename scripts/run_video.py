@@ -15,7 +15,7 @@ from src.visualization import draw_counts, draw_fps, draw_line_crossing, draw_li
 LINE_START =  (50, 400)
 LINE_END = (1850, 400)
 DEAD_ZONE_PX = 5
-CONFIRMATION_FRAMES = 5
+CONFIRMATION_FRAMES = 3
 TARGET_CLASSES = {"person"}
 
 

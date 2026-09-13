@@ -3,6 +3,7 @@ from math import hypot
 Point = tuple[int, int]  # (x, y)
 
 def calculate_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
+    """Calculate the intersection-over-union score for two bounding boxes."""
     ax1, ay1, ax2, ay2 = box_a
     bx1, by1, bx2, by2 = box_b
 
@@ -24,12 +25,14 @@ def calculate_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, 
 
 
 def side_of_line(point: Point, line_start: Point, line_end: Point) -> float:
+    """Return the signed cross-product value of a point relative to a line."""
     px, py = point
     x1, y1 = line_start
     x2, y2 = line_end
     return (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
 
 def classify_side(distance: float, dead_zone_px: float = 5.0) -> int:
+    """Classify a signed distance as positive, negative, or inside the dead zone."""
     if distance > dead_zone_px:
         return 1
 
@@ -38,6 +41,7 @@ def classify_side(distance: float, dead_zone_px: float = 5.0) -> int:
     return 0
 
 def segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool:
+    """Check whether two line segments intersect, including endpoint touches."""
     ab_c = side_of_line(c, a, b)
     ab_d = side_of_line(d, a, b)
     cd_a = side_of_line(a, c, d)
@@ -61,6 +65,7 @@ def segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool:
     return False
 
 def point_on_segment(point: Point, start: Point, end: Point) -> bool:
+    """Check whether a collinear point lies within a segment's bounding range."""
     px, py = point
     x1, y1 = start
     x2, y2 = end
@@ -74,6 +79,7 @@ def has_crossed_line(
     line_end: Point,
     dead_zone_px: float = 5.0,
 ) -> bool:
+    """Return whether movement between two points crosses the configured line."""
     previous_distance = signed_distance_to_line(previous_point, line_start, line_end)
     current_distance = signed_distance_to_line(current_point, line_start, line_end)
 
@@ -89,6 +95,7 @@ def has_crossed_line(
     return segments_intersect(previous_point, current_point, line_start, line_end)
 
 def signed_distance_to_line(point: Point, line_start: Point, line_end: Point) -> float:
+    """Calculate the signed perpendicular distance from a point to a line."""
     x1, y1 = line_start
     x2, y2 = line_end
 
