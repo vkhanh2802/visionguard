@@ -16,16 +16,16 @@ from src.events import Event
 LINE_START =  (50, 300)
 LINE_END = (750, 300)
 RESTRICTED_ZONE = (
-    (100, 450),
-    (300, 450),
-    (300, 350),
-    (100, 350),
+    (1400, 750),
+    (2050, 750),
+    (2350, 350),
+    (1600, 350),
 )
 
 DEAD_ZONE_PX = 5.0
 CONFIRMATION_FRAMES = 3
 MAX_MISSING_FRAMES = 30
-LOITERING_THRESHOLD_SECONDS = 10.0
+LOITERING_THRESHOLD_SECONDS = 5.0
 ZONE_ID = "restricted-zone-1"
 TARGET_CLASSES = {"person"}
 

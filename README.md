@@ -26,6 +26,13 @@ Week 2 completed:
 - IoU implementation
 - Geometry unit tests
 
+Week 3 implemented and evaluated: line crossing and people counting.
+
+Week 4 implemented and manually evaluated: restricted-zone intrusion and loitering.
+The current baseline includes three independent event engines, annotated video output,
+and a three-video evaluation. See [Week 4 evaluation](docs/week4_evaluation.md)
+for results, failure analysis, and remaining validation items.
+
 ## Pipeline
 
 ```text
@@ -39,18 +46,18 @@ ByteTrack
   |
   v
 Track[]
-  |
-  v
-LineCrossingEngine
+  |-- LineCrossingEngine
+  |-- IntrusionEngine
+  |-- LoiteringEngine
   |
   v
 Event[]
   |
   v
-IN / OUT Counters
+Counters + Console Logging + Visualization
   |
   v
-Visualization
+Annotated Output Video
 ```
 
 ## Installation
@@ -247,3 +254,81 @@ These errors cannot be fully corrected by the line-crossing state machine alone 
 - Maximum missing frames: `30`
 
 These values were selected empirically on three videos with different levels of crowding and occlusion.
+
+## Week 4 - Restricted-Zone Intrusion & Loitering
+
+Implemented:
+
+- Polygon ROI and self-implemented ray-casting point-in-polygon geometry
+- Bottom-center based ROI membership checks
+- Intrusion events on observed outside-to-inside transitions
+- Loitering events based on video timestamps and a configurable dwell threshold
+- Independent per-track state and stale-state cleanup
+- Combined line crossing, intrusion, and loitering processing on every frame
+- ROI outlines, track trajectories, event counters, and console event logs
+- Unit tests for polygon geometry, intrusion, loitering, and multi-engine integration
+
+### Design Decisions
+
+- Points on polygon edges or vertices are treated as inside the ROI.
+- A track's first observation does not produce an intrusion event, even if inside.
+- Loitering starts at the first observed inside position and triggers once per visit.
+- An observed exit resets the loitering visit; a later re-entry can produce new events.
+- Short tracking gaps retain state within the configured frame-gap limit. Loitering
+  duration includes that gap, but an event is emitted only on an observed inside track.
+- Dwell time measures presence in the ROI; the person does not need to stand still.
+- Event engines perform no drawing; visualization is handled separately.
+
+### Evaluation Summary
+
+Three videos were manually evaluated with a **5-second loitering threshold**.
+Intrusion results below are calculated from the author's reported event matches:
+
+| Video | Ground Truth | Predicted | TP | FP | FN | Precision | Recall | F1 |
+| ----- | -----------: | --------: | -: | -: | -: | --------: | -----: | -: |
+| A | 6 | 5 | 5 | 0 | 1 | 100.00% | 83.33% | 90.91% |
+| B | 10 | 12 | 10 | 2 | 0 | 83.33% | 100.00% | 90.91% |
+| C | 2 | 2 | 2 | 0 | 0 | 100.00% | 100.00% | 100.00% |
+| **Total (micro)** | **18** | **19** | **17** | **2** | **1** | **89.47%** | **94.44%** | **91.89%** |
+
+Loitering detected **1/1 reported ground-truth event**, with no reported false
+loitering events across the three clips. This is a small baseline with only one
+positive loitering example, not evidence of general-purpose accuracy.
+
+Observed failures:
+
+- **Video A:** one missed intrusion when two nearby people shared a single bounding box.
+- **Video B:** two false intrusions caused by bottom-center jitter across the ROI boundary.
+- **Video C:** no reported event errors; part of the configured ROI extends beyond the image.
+
+Full ROI coordinates, clip metadata, methodology, and follow-ups are documented in
+[docs/week4_evaluation.md](docs/week4_evaluation.md).
+
+### Running the Week 4 Baseline
+
+Set `RESTRICTED_ZONE`, `LINE_START`, `LINE_END`, and
+`LOITERING_THRESHOLD_SECONDS` in `scripts/run_video.py` for the selected video.
+ROI coordinates are in original-frame pixels and are camera-specific. The report
+contains the three evaluated ROIs; the current script is configured for video C.
+
+```bash
+python -m scripts.run_video --source path/to/video.mp4 --model yolo26n.pt --conf 0.4 --output data/outputs/week4_demo.mp4 --no-display
+python -m pytest tests/ -q
+```
+
+Replace the source path with your local video. The local demo outputs are
+`data/outputs/week4videoA.mp4`, `data/outputs/week4videoB.mp4`, and
+`data/outputs/week4videoC.mp4`. Input/output videos are ignored by Git and are not
+bundled with a clone of this repository.
+
+### Remaining Validation and Improvements
+
+- Confirm a full test-suite pass; no new pytest pass is claimed by this documentation update.
+- Check cleanup boundary cases, including continuous observations with
+  `max_missing_frames=0` and exact-limit tracking gaps.
+- Add stable inside/outside confirmation to reduce boundary-jitter duplicates,
+  then re-evaluate all three clips for any loss in recall.
+- Add event timestamps and track references to the annotations, measure loitering
+  trigger delay, and expand the number of positive loitering examples.
+- ID switches can reset dwell timers or cause repeated alerts for the same physical
+  person; short-gap continuity assumes no unobserved exit and re-entry.
