@@ -1,6 +1,7 @@
 from math import hypot
 
-Point = tuple[int, int]  # (x, y)
+Point = tuple[int, float]  # (x, y)
+Polygon = tuple[Point, ...]
 
 def calculate_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, int]) -> float:
     """Calculate the intersection-over-union score for two bounding boxes."""
@@ -23,6 +24,35 @@ def calculate_iou(box_a: tuple[int, int, int, int], box_b: tuple[int, int, int, 
 
     return intersection_area / union_area if union_area > 0 else 0.0
 
+def point_in_polygon(point: Point, polygon: Polygon) -> bool:
+    if len(polygon) < 3:
+        raise ValueError("A polygon must contain at least three points.")
+
+    px, py = point
+    inside = False
+    previous = polygon[-1]
+
+    for current in polygon:
+        x1, y1 = previous
+        x2, y2 = current
+
+        on_edge = (
+            abs(side_of_line(point, previous, current)) <= 1e-9
+            and point_on_segment(point, previous, current)
+        )
+        if on_edge:
+            return True
+
+        crosses_horizontal_ray = (y1 > py) != (y2 > py)
+        if crosses_horizontal_ray:
+            x_intersection = x1 + (py - y1) * (x2 - x1) / (y2 - y1)
+
+            if px < x_intersection:
+                inside = not inside
+
+        previous = current
+
+    return inside
 
 def side_of_line(point: Point, line_start: Point, line_end: Point) -> float:
     """Return the signed cross-product value of a point relative to a line."""
