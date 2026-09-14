@@ -5,8 +5,7 @@ from src.detection import Detection
 from src.tracking import Track
 from src.tracking.history import TrackHistory
 from math import hypot
-from src.events import LineCrossingEngine
-
+from src.events import LineCrossingEngine, IntrusionEngine, LoiteringEngine
 
 def draw_detections(frame: np.ndarray, detections: list[Detection]) -> np.ndarray:
     for detection in detections:
@@ -16,10 +15,6 @@ def draw_detections(frame: np.ndarray, detections: list[Detection]) -> np.ndarra
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
         cv2.putText(frame, label, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-    return frame
-
-def draw_fps(frame: np.ndarray, fps: float) -> np.ndarray:
-    cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     return frame
 
 def draw_tracks(frame: np.ndarray, tracks: list[Track]) -> np.ndarray:
@@ -103,9 +98,43 @@ def draw_line_directions(frame, engine: LineCrossingEngine):
 
     return frame
 
-def draw_counts(frame, engine: LineCrossingEngine):
-    cv2.putText(frame, f"IN: {engine.in_count}", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-    cv2.putText(frame, f"OUT: {engine.out_count}", (20, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-    cv2.putText(frame, f"NET: {engine.net_count}", (20, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+def draw_polygon_roi(frame: np.ndarray, polygon: tuple[tuple[float, float],...], label: str) -> np.ndarray:
+    points = np.array(polygon, dtype=np.int32).reshape((-1, 1, 2))
+    cv2.polylines(
+        frame,
+        [points],
+        isClosed=True,
+        color=(0, 0, 255),
+        thickness=2,
+    )
 
+    x, y = points[0, 0]
+    cv2.putText(
+        frame,
+        label,
+        (int(x), max(int(y) - 10, 20)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (0, 0, 255),
+        2,
+    )
+
+    return frame
+
+
+def draw_event_counts( frame: np.ndarray, line_engine: LineCrossingEngine, intrusion_engine: IntrusionEngine, loitering_engine: LoiteringEngine) -> np.ndarray:
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 0.8
+    thickness = 2
+
+    cv2.putText(frame, f"IN: {line_engine.in_count}", (20, 80), font, scale, (0, 255, 0), thickness)
+    cv2.putText(frame, f"OUT: {line_engine.out_count}", (20, 110), font, scale, (0, 0, 255), thickness)
+    cv2.putText(frame, f"INTRUSIONS: {intrusion_engine.intrusion_count}", (20, 140), font, scale, (255, 0, 255), thickness)
+    cv2.putText(frame, f"LOITERING: {loitering_engine.loitering_count}", (20, 170), font, scale, (0, 165, 255), thickness)
+
+    return frame
+
+
+def draw_fps(frame: np.ndarray, fps: float) -> np.ndarray:
+    cv2.putText(frame, f"FPS: {fps:.1f}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
     return frame

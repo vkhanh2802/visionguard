@@ -44,6 +44,14 @@ class LoiteringEngine:
         for track_id in stale_ids:
             self.visits.pop(track_id, None)
 
+    def get_duration(self, track_id: int, timestamp: float) -> float | None:
+        visit = self.visits.get(track_id)
+
+        if visit is None:
+            return None
+
+        return timestamp - visit.entry_timestamp
+
     def process(self, tracks: list[Track], frame_id: int, timestamp: float,) -> list[Event]:
         self._cleanup_stale_visits(frame_id)
         events = []
