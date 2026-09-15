@@ -79,7 +79,7 @@ class LineCrossingEngine:
         stale_ids = [
             track_id
             for track_id, last_frame in self.last_seen_frame.items()
-            if frame_id - last_frame > self.max_missing_frames
+            if frame_id - last_frame -1 > self.max_missing_frames
         ]
 
         for track_id in stale_ids:
@@ -92,6 +92,7 @@ class LineCrossingEngine:
 
     def process(self, tracks: list[Track], frame_id: int, timestamp: float) -> list[Event]:
         events = []
+        self._cleanup_stale_tracks(frame_id)
 
         for track in tracks:
             track_id = track.track_id
@@ -146,7 +147,5 @@ class LineCrossingEngine:
             self.last_stable_side[track_id] = current_side
             self.last_stable_point[track_id] = point
             self._clear_pending(track_id)
-
-        self._cleanup_stale_tracks(frame_id)
 
         return events

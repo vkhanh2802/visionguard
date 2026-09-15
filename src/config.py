@@ -127,12 +127,18 @@ class LoggingConfig(BaseModel):
     event_jsonl_path: Path = Path("data/outputs/events.jsonl")
     run_metadata_path: Path = Path("data/outputs/run_metadata.json")
     
+class VideoConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fps_override: float | None = Field(default=None, gt=0.0)
+    
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra = "forbid")
 
     detection: DetectionConfig
     tracking: TrackingConfig
     events: EventsConfig
+    video: VideoConfig = Field(default_factory=VideoConfig)
     output: OutputConfig
     logging: LoggingConfig
 
@@ -154,5 +160,3 @@ def load_config(path: str | Path) -> AppConfig:
     return AppConfig.model_validate(data)
 
 
-
-    

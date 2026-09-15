@@ -93,7 +93,9 @@ def print_summary(result: PipelineResult) -> None:
     print("Processing completed")
     print(f"Frames: {result.processed_frames}")
     print(f"Source FPS: {result.source_fps:.2f}")
-    print(f"Processing FPS: {result.processing_fps:.2f}")
+    print(f"Effective FPS: {result.effective_fps:.2f}")
+    print(f"Core processing FPS: {result.core_processing_fps:.2f}")
+    print(f"End-to-end FPS: {result.end_to_end_fps:.2f}")
     print(f"Elapsed time: {result.elapsed_seconds:.2f}s")
     print(f"IN: {result.in_count}")
     print(f"OUT: {result.out_count}")
@@ -101,7 +103,10 @@ def print_summary(result: PipelineResult) -> None:
     print(f"Intrusions: {result.intrusion_count}")
     print(f"Loitering: {result.loitering_count}")
     print(f"Output: {result.output_path}")
-
+    if result.stopped_early:
+        print("Status: stopped early by user")
+    else:
+        print("Status: completed")
 
 def main() -> None:
     args = parse_args()

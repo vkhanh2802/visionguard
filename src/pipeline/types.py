@@ -7,7 +7,10 @@ class PipelineResult:
     output_path: Path
     processed_frames: int
     source_fps: float
-    processing_fps: float
+    effective_fps: float
+    core_processing_fps: float
+    end_to_end_fps: float
+    stopped_early: bool
     elapsed_seconds: float
     in_count: int
     out_count: int

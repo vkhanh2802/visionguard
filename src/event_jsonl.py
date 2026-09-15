@@ -53,8 +53,11 @@ class EventJsonlWriter:
             "output_path": str(result.output_path),
             "processed_frames": result.processed_frames,
             "source_fps": result.source_fps,
-            "processing_fps": result.processing_fps,
+            "effective_fps": result.effective_fps,
+            "core_processing_fps": result.core_processing_fps,
+            "end_to_end_fps": result.end_to_end_fps,
             "elapsed_seconds": result.elapsed_seconds,
+            "stopped_early": result.stopped_early,
             "counts": {
                 "in": result.in_count,
                 "out": result.out_count,

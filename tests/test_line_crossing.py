@@ -149,3 +149,33 @@ def test_single_frame_side_jitter_does_not_create_event():
 
     assert all_events == []
     assert engine.total_count == 0
+
+def test_one_missing_frame_preserves_line_crossing_state():
+    engine = LineCrossingEngine(
+        (0, 0),
+        (10, 0),
+        max_missing_frames=1,
+    )
+
+    engine.process([make_track(1, (5, -5))], 1, 0.0)
+    engine.process([], 2, 0.1)
+
+    events = engine.process([make_track(1, (5, 5))], 3, 0.2)
+
+    assert len(events) == 1
+    assert events[0].direction == "IN"
+
+def test_two_missing_frames_expire_line_crossing_state():
+    engine = LineCrossingEngine(
+        (0, 0),
+        (10, 0),
+        max_missing_frames=1,
+    )
+
+    engine.process([make_track(1, (5, -5))], 1, 0.0)
+    engine.process([], 2, 0.1)
+    engine.process([], 3, 0.2)
+
+    events = engine.process([make_track(1, (5, 5))], 4, 0.3)
+
+    assert events == []

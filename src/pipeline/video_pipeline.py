@@ -36,6 +36,19 @@ class VideoPipeline:
     ):
         self.config = config
         self.event_handler = event_handler
+    def _resolve_effective_fps(self, source_fps: float) -> float:
+        fps_override = self.config.video.fps_override
+
+        if fps_override is not None:
+            return fps_override
+
+        if source_fps <= 0:
+            raise RuntimeError(
+                "Input video does not provide a valid FPS. "
+                "Set video.fps_override in the config."
+            )
+
+        return source_fps
 
     def run(
         self,
@@ -60,15 +73,19 @@ class VideoPipeline:
                 raise RuntimeError(f"Cannot open video: {source_path}")
 
             source_fps = capture.get(cv2.CAP_PROP_FPS)
+            effective_fps = self._resolve_effective_fps(source_fps)
             width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
             if source_fps <= 0:
                 raise RuntimeError("Input video does not provide a valid FPS.")
-
+            if width <= 0 or height <= 0:
+                raise RuntimeError(
+                    f"Input video has invalid dimensions: {width}x{height}")
+            
             writer = create_video_writer(
                 output_path=output_path,
-                fps=source_fps,
+                fps=effective_fps,
                 width=width,
                 height=height,
                 codec=self.config.output.codec,
@@ -89,7 +106,8 @@ class VideoPipeline:
 
             fps_meter = FPSMeter()
             frame_id = 0
-
+            frame_loop_start = perf_counter()
+            stopped_early = False
             while True:
                 success, frame = capture.read()
 
@@ -101,7 +119,7 @@ class VideoPipeline:
                 tracks = tracker.track(frame)
                 track_history.update(tracks)
 
-                timestamp = frame_id / source_fps
+                timestamp = frame_id / effective_fps
 
                 events = self._process_events(
                     tracks=tracks,
@@ -135,31 +153,40 @@ class VideoPipeline:
                     cv2.imshow("VisionGuard", frame)
 
                     if cv2.waitKey(1) & 0xFF == ord("q"):
+                        stopped_early = True
                         break
-
+            frame_loop_elapsed = perf_counter() - frame_loop_start
+            end_to_end_fps = (
+                frame_id / frame_loop_elapsed
+                if frame_loop_elapsed > 0
+                else 0.0
+            )
             if frame_id == 0:
                 raise RuntimeError(f"Input video contains no readable frames: {source_path}")
 
             return PipelineResult(
-                source_path=source_path,
-                output_path=output_path,
-                processed_frames=frame_id,
-                source_fps=source_fps,
-                processing_fps=fps_meter.fps,
-                elapsed_seconds=perf_counter() - start_time,
-                in_count=line_engine.in_count if line_engine is not None else 0,
-                out_count=line_engine.out_count if line_engine is not None else 0,
-                intrusion_count=(
-                    intrusion_engine.intrusion_count
-                    if intrusion_engine is not None
-                    else 0
-                ),
-                loitering_count=(
-                    loitering_engine.loitering_count
-                    if loitering_engine is not None
-                    else 0
-                ),
-            )
+            source_path=source_path,
+            output_path=output_path,
+            processed_frames=frame_id,
+            source_fps=source_fps,
+            effective_fps=effective_fps,
+            core_processing_fps=fps_meter.fps,
+            end_to_end_fps=end_to_end_fps,
+            elapsed_seconds=perf_counter() - start_time,
+            stopped_early=stopped_early,
+            in_count=line_engine.in_count if line_engine else 0,
+            out_count=line_engine.out_count if line_engine else 0,
+            intrusion_count=(
+                intrusion_engine.intrusion_count
+                if intrusion_engine
+                else 0
+            ),
+            loitering_count=(
+                loitering_engine.loitering_count
+                if loitering_engine
+                else 0
+            ),
+        )
         finally:
             capture.release()
 

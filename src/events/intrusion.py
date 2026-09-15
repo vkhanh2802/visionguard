@@ -29,7 +29,7 @@ class IntrusionEngine:
         stale_ids = [
             track_id
             for track_id, last_seen_frame in self.last_seen_frame.items()
-            if frame_id - last_seen_frame > self.max_missing_frames
+            if frame_id - last_seen_frame - 1 > self.max_missing_frames
         ]
 
         for track_id in stale_ids:

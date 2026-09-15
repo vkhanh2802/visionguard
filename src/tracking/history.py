@@ -20,7 +20,7 @@ class TrackHistory:
         stale_ids = [
             track_id
             for track_id, last_frame in self.last_seen.items()
-            if self.frame_id - last_frame > self.max_missing_frames
+            if self.frame_id - last_frame - 1 > self.max_missing_frames
         ]
 
         for track_id in stale_ids:
