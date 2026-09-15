@@ -18,13 +18,13 @@ events:
     negative_to_positive: IN
     positive_to_negative: OUT
 
-zones:
-  restricted-zone-1:
-    polygon:
-      - [100, 100]
-      - [200, 100]
-      - [200, 200]
-      - [100, 200]
+  zones:
+    restricted-zone-1:
+      polygon:
+        - [100, 100]
+        - [200, 100]
+        - [200, 200]
+        - [100, 200]
   intrusion:
     enabled: true
     zone_id: restricted-zone-1
@@ -32,7 +32,7 @@ zones:
   loitering:
     enabled: true
     zone_id: restricted-zone-1
-    loitering_time_sec: 5.0
+    dwell_threshold_seconds: 5.0 
 
 output:
   display: true
