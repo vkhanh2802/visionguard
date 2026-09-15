@@ -8,3 +8,5 @@ dependencies:
       - ultralytics
       - opencv-python
       - pytest
+      - pydantic >=2, <3
+      - PyYAML >=6, <7
