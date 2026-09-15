@@ -25,7 +25,7 @@ from src.visualization import (
 from .types import PipelineResult
 
 
-EventHandler = Callable[[Event], None]
+EventHandler = Callable[[Event, int], None]
 
 
 class VideoPipeline:
@@ -116,7 +116,7 @@ class VideoPipeline:
 
                 for event in events:
                     if self.event_handler is not None:
-                        self.event_handler(event)
+                        self.event_handler(event, frame_id)
 
                 self._draw_frame(
                     frame=frame,

@@ -1,6 +1,10 @@
 import argparse
 from pathlib import Path
 
+import logging 
+from src.event_jsonl import EventJsonlWriter
+from src.logging_config import configure_logging
+
 from src.config import AppConfig, load_config
 from src.events import Event
 from src.pipeline import PipelineResult, VideoPipeline
@@ -64,24 +68,25 @@ def apply_cli_overrides(
     return AppConfig.model_validate(data)
 
 
-def log_event(event: Event) -> None:
-    message = (
-        f"[{event.timestamp:7.2f}s] "
-        f"{event.event_type} "
-        f"track=#{event.track_id}"
+def handle_event(
+    event: Event,
+    frame_id: int,
+    event_writer: EventJsonlWriter,
+    logger: logging.Logger,
+    ) -> None:
+    event_writer.write_event(event, frame_id)
+
+    logger.info(
+        "event=%s track_id=%s frame_id=%s video_timestamp=%.2f "
+        "direction=%s zone_id=%s duration_seconds=%s",
+        event.event_type,
+        event.track_id,
+        frame_id,
+        event.timestamp,
+        event.direction,
+        event.zone_id,
+        event.duration_seconds,
     )
-
-    if event.direction is not None:
-        message += f" direction={event.direction}"
-
-    if event.zone_id is not None:
-        message += f" zone={event.zone_id}"
-
-    if event.duration_seconds is not None:
-        message += f" duration={event.duration_seconds:.1f}s"
-
-    print(message)
-
 
 def print_summary(result: PipelineResult) -> None:
     print()
@@ -104,18 +109,40 @@ def main() -> None:
     config = load_config(args.config)
     config = apply_cli_overrides(config, args)
 
-    pipeline = VideoPipeline(
-        config=config,
-        event_handler=log_event,
+    logger = configure_logging(config.logging.level)
+
+    event_writer = EventJsonlWriter(
+        event_path=config.logging.event_jsonl_path,
+        metadata_path=config.logging.run_metadata_path,
     )
 
-    result = pipeline.run(
-        source_path=Path(args.source),
-        output_path=Path(args.output),
-    )
+    try:
+        pipeline = VideoPipeline(
+            config=config,
+            event_handler=lambda event, frame_id: handle_event(
+                event,
+                frame_id,
+                event_writer,
+                logger,
+            ),
+        )
 
-    print_summary(result)
+        result = pipeline.run(
+            source_path=Path(args.source),
+            output_path=Path(args.output),
+        )
 
+        event_writer.write_metadata(
+            config_data=config.model_dump(mode="json"),
+            result=result,
+        )
+
+        print_summary(result)
+    except Exception:
+        logger.exception("Pipeline failed")
+        raise
+    finally:
+        event_writer.close()
 
 if __name__ == "__main__":
     main()

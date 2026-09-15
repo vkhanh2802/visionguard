@@ -125,7 +125,8 @@ class LoggingConfig(BaseModel):
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     event_jsonl_path: Path = Path("data/outputs/events.jsonl")
-
+    run_metadata_path: Path = Path("data/outputs/run_metadata.json")
+    
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra = "forbid")
 

@@ -41,3 +41,4 @@ output:
 logging:
   level: INFO
   event_jsonl_path: data/outputs/events.jsonl
+  run_metadata_path: data/outputs/run_metadata.json
