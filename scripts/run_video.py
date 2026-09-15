@@ -1,43 +1,68 @@
 import argparse
 from pathlib import Path
 
-import cv2
-
-from src.tracking import YOLOByteTracker
-from src.fps_meter import FPSMeter
-from src.video import create_video_writer
-from src.visualization import draw_tracks, draw_fps, draw_trajectories
-from src.tracking.history import TrackHistory
-
-from src.events import LineCrossingEngine, IntrusionEngine, LoiteringEngine
-
-from src.visualization import draw_fps, draw_line_crossing, draw_line_directions, draw_tracks, draw_trajectories, draw_event_counts, draw_polygon_roi 
+from src.config import AppConfig, load_config
 from src.events import Event
-LINE_START =  (50, 300)
-LINE_END = (750, 300)
-RESTRICTED_ZONE = (
-    (1400, 750),
-    (2050, 750),
-    (2350, 350),
-    (1600, 350),
-)
-
-DEAD_ZONE_PX = 5.0
-CONFIRMATION_FRAMES = 3
-MAX_MISSING_FRAMES = 30
-LOITERING_THRESHOLD_SECONDS = 5.0
-ZONE_ID = "restricted-zone-1"
-TARGET_CLASSES = {"person"}
+from src.pipeline import PipelineResult, VideoPipeline
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="VisionGuard object detection pipeline")
-    parser.add_argument("--source", required=True, help="Path to input video")
-    parser.add_argument("--output", default="data/outputs/output.mp4", help="Path to output video")
-    parser.add_argument("--model", default="yolo26n.pt", help="YOLO model path")
-    parser.add_argument("--conf", type=float, default=0.4, help="Confidence threshold")
-    parser.add_argument("--no-display", action="store_true", help="Disable preview window")
+    parser = argparse.ArgumentParser(
+        description="VisionGuard video analytics pipeline",
+    )
+
+    parser.add_argument(
+        "--config",
+        default="configs/default.yaml",
+        help="Path to YAML configuration",
+    )
+    parser.add_argument(
+        "--source",
+        required=True,
+        help="Path to input video",
+    )
+    parser.add_argument(
+        "--output",
+        default="data/outputs/output.mp4",
+        help="Path to annotated output video",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Override detection.model_path from config",
+    )
+    parser.add_argument(
+        "--conf",
+        type=float,
+        default=None,
+        help="Override detection.confidence from config",
+    )
+    parser.add_argument(
+        "--no-display",
+        action="store_true",
+        help="Disable preview window",
+    )
+
     return parser.parse_args()
+
+
+def apply_cli_overrides(
+    config: AppConfig,
+    args: argparse.Namespace,
+) -> AppConfig:
+    data = config.model_dump(mode="python")
+
+    if args.model is not None:
+        data["detection"]["model_path"] = args.model
+
+    if args.conf is not None:
+        data["detection"]["confidence"] = args.conf
+
+    if args.no_display:
+        data["output"]["display"] = False
+
+    return AppConfig.model_validate(data)
+
 
 def log_event(event: Event) -> None:
     message = (
@@ -57,107 +82,39 @@ def log_event(event: Event) -> None:
 
     print(message)
 
+
+def print_summary(result: PipelineResult) -> None:
+    print()
+    print("Processing completed")
+    print(f"Frames: {result.processed_frames}")
+    print(f"Source FPS: {result.source_fps:.2f}")
+    print(f"Processing FPS: {result.processing_fps:.2f}")
+    print(f"Elapsed time: {result.elapsed_seconds:.2f}s")
+    print(f"IN: {result.in_count}")
+    print(f"OUT: {result.out_count}")
+    print(f"NET: {result.in_count - result.out_count}")
+    print(f"Intrusions: {result.intrusion_count}")
+    print(f"Loitering: {result.loitering_count}")
+    print(f"Output: {result.output_path}")
+
+
 def main() -> None:
     args = parse_args()
 
-    source = Path(args.source)
-    output = Path(args.output)
+    config = load_config(args.config)
+    config = apply_cli_overrides(config, args)
 
-    if not source.exists():
-        raise FileNotFoundError(f"Video does not exist: {source}")
-
-    tracker = YOLOByteTracker(model_path=args.model, confidence=args.conf, target_classes=TARGET_CLASSES)
-    cap = cv2.VideoCapture(str(source))
-
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open video: {source}")
-
-    source_fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    writer = create_video_writer(output, source_fps, width, height)
-    fps_meter = FPSMeter()
-    track_history = TrackHistory(max_length=30)  # Store the last 30 positions for each track
-    line_crossing_engine = LineCrossingEngine(
-        line_start = LINE_START, 
-        line_end = LINE_END, 
-        dead_zone_px = DEAD_ZONE_PX,
-        max_missing_frames = 30,
-        confirmation_frames = CONFIRMATION_FRAMES,
-    )
-    intrusion_engine = IntrusionEngine(
-        polygon = RESTRICTED_ZONE,
-        zone_id = ZONE_ID,
-        max_missing_frames = MAX_MISSING_FRAMES,
-    )
-    loitering_engine = LoiteringEngine(
-        polygon = RESTRICTED_ZONE,
-        dwell_threshold_seconds = LOITERING_THRESHOLD_SECONDS,
-        zone_id = ZONE_ID,
-        max_missing_frames = MAX_MISSING_FRAMES,
+    pipeline = VideoPipeline(
+        config=config,
+        event_handler=log_event,
     )
 
-    print(f"Input: {source}")
-    print(f"Resolution: {width}x{height}")
-    print(f"Source FPS: {source_fps:.2f}")
-    print(f"Frames: {frame_count}")
+    result = pipeline.run(
+        source_path=Path(args.source),
+        output_path=Path(args.output),
+    )
 
-    frame_id = 0
-    video_fps = source_fps if source_fps > 0 else 30.0  # Default to 30 FPS if source FPS is not available
-    try:
-        while True:
-            success, frame = cap.read()
-
-            if not success:
-                break
-
-            fps_meter.start()
-            tracks = tracker.track(frame)
-            track_history.update(tracks)
-
-            timestamp = frame_id / video_fps
-
-            line_events = line_crossing_engine.process(tracks, frame_id=frame_id, timestamp=timestamp)
-            intrusion_events = intrusion_engine.process(tracks, frame_id=frame_id, timestamp=timestamp)
-            loitering_events = loitering_engine.process(tracks, frame_id=frame_id, timestamp=timestamp)
-            events = [*line_events, *intrusion_events, *loitering_events]
-            tracking_fps = fps_meter.stop()
-
-            for event in events:
-                log_event(event)
-
-            draw_tracks(frame, tracks)
-            draw_fps(frame, tracking_fps)
-            draw_trajectories(frame, tracks, track_history)
-            draw_line_crossing(frame, line_crossing_engine)
-            draw_line_directions(frame, line_crossing_engine)
-            draw_polygon_roi(frame, RESTRICTED_ZONE, label = "restricted_zone")
-            draw_event_counts(frame, line_crossing_engine, intrusion_engine, loitering_engine)
-
-            writer.write(frame)
-            frame_id += 1
-
-            if not args.no_display:
-                cv2.imshow("VisionGuard", frame) 
-
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
-    finally:
-        cap.release()
-        writer.release()
-        cv2.destroyAllWindows()
-
-    print()
-    print("Processing completed")
-    print(f"Frames: {frame_id}")
-    print(f"Tracking FPS: {fps_meter.fps:.2f}")
-    print(f"IN: {line_crossing_engine.in_count}")
-    print(f"OUT: {line_crossing_engine.out_count}")
-    print(f"NET: {line_crossing_engine.net_count}")
-    print(f"Total crossings: {line_crossing_engine.total_count}")
-    print(f"Output: {output}")
+    print_summary(result)
 
 
 if __name__ == "__main__":

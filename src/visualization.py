@@ -37,11 +37,25 @@ def draw_trajectories(frame: np.ndarray, tracks: list[Track], history: TrackHist
     return frame
 
 def draw_line_crossing(frame, engine: LineCrossingEngine):
-    start = engine.line_start
-    end = engine.line_end
+    start = (
+        round(engine.line_start[0]),
+        round(engine.line_start[1]),
+    )
+    end = (
+        round(engine.line_end[0]),
+        round(engine.line_end[1]),
+    )
 
-    positive_start, positive_end = _offset_line(start, end, engine.dead_zone_px)
-    negative_start, negative_end = _offset_line(start, end, -engine.dead_zone_px)
+    positive_start, positive_end = _offset_line(
+        start,
+        end,
+        engine.dead_zone_px,
+    )
+    negative_start, negative_end = _offset_line(
+        start,
+        end,
+        -engine.dead_zone_px,
+    )
 
     cv2.line(frame, positive_start, positive_end, (100, 100, 100), 1)
     cv2.line(frame, negative_start, negative_end, (100, 100, 100), 1)
@@ -122,15 +136,15 @@ def draw_polygon_roi(frame: np.ndarray, polygon: tuple[tuple[float, float],...],
     return frame
 
 
-def draw_event_counts( frame: np.ndarray, line_engine: LineCrossingEngine, intrusion_engine: IntrusionEngine, loitering_engine: LoiteringEngine) -> np.ndarray:
+def draw_event_counts(frame: np.ndarray, in_count: int, out_count: int, intrusion_count: int, loitering_count: int) -> np.ndarray:
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 0.8
     thickness = 2
 
-    cv2.putText(frame, f"IN: {line_engine.in_count}", (20, 80), font, scale, (0, 255, 0), thickness)
-    cv2.putText(frame, f"OUT: {line_engine.out_count}", (20, 110), font, scale, (0, 0, 255), thickness)
-    cv2.putText(frame, f"INTRUSIONS: {intrusion_engine.intrusion_count}", (20, 140), font, scale, (255, 0, 255), thickness)
-    cv2.putText(frame, f"LOITERING: {loitering_engine.loitering_count}", (20, 170), font, scale, (0, 165, 255), thickness)
+    cv2.putText(frame, f"IN: {in_count}", (20, 80), font, scale, (0, 255, 0), thickness,)
+    cv2.putText(frame, f"OUT: {out_count}", (20, 110), font, scale, (0, 0, 255), thickness)
+    cv2.putText(frame, f"INTRUSIONS: {intrusion_count}", (20, 140), font, scale, (255, 0, 255), thickness)
+    cv2.putText(frame, f"LOITERING: {loitering_count}", (20, 170), font, scale, (0, 165, 255), thickness)
 
     return frame
 

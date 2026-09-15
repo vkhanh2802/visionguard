@@ -5,7 +5,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from configs.config import load_config
+from src.config import load_config
 
 
 @pytest.fixture
