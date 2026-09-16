@@ -24,17 +24,21 @@ class EventJsonlWriter:
     def write_event(self, event: Event, frame_id: int) -> None:
         record = {
             "run_id": self.run_id,
-            "frame_id": frame_id,
-            "event_type": event.event_type,
-            "track_id": event.track_id,
-            "video_timestamp": event.timestamp,
+            "frame_id": int(frame_id),
+            "event_type": str(event.event_type),
+            "track_id": int(event.track_id),
+            "video_timestamp": float(event.timestamp),
             "position": {
-                "x": event.position[0],
-                "y": event.position[1],
+                "x": int(event.position[0]),
+                "y": int(event.position[1]),
             },
             "direction": event.direction,
             "zone_id": event.zone_id,
-            "duration_seconds": event.duration_seconds,
+            "duration_seconds": (
+                float(event.duration_seconds)
+                if event.duration_seconds is not None
+                else None
+            ),
             "logged_at": datetime.now(timezone.utc).isoformat(),
         }
 

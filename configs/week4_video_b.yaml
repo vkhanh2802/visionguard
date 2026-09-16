@@ -1,0 +1,48 @@
+detection:
+  model_path: yolo26n.pt
+  confidence: 0.4
+  target_classes:
+    - person
+
+tracking:
+  history_length: 30
+  max_missing_frames: 30
+
+events:
+  line_crossing:
+    enabled: true
+    start: [50, 300]
+    end: [750, 300]
+    dead_zone_px: 5.0
+    confirmation_frames: 3
+    negative_to_positive: IN
+    positive_to_negative: OUT
+
+  zones:
+    restricted-zone-1:
+      polygon:
+        - [100, 450]
+        - [300, 450]
+        - [300, 350]
+        - [100, 350]
+
+  intrusion:
+    enabled: true
+    zone_id: restricted-zone-1
+
+  loitering:
+    enabled: true
+    zone_id: restricted-zone-1
+    dwell_threshold_seconds: 5.0
+
+output:
+  display: true
+  codec: mp4v
+
+logging:
+  level: INFO
+  event_jsonl_path: data/outputs/week5videoB.events.jsonl
+  run_metadata_path: data/outputs/week5videoB.metadata.json
+
+video:
+  fps_override: null
