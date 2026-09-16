@@ -4,6 +4,7 @@ __pycache__/
 
 data/videos/*
 data/outputs/*
+data/*.db
 
 *.pt
 runs/

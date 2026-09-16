@@ -1,17 +1,16 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
 from src.events import Event
 from src.pipeline.types import PipelineResult
 
 
 class EventJsonlWriter:
-    def __init__(self, event_path: Path, metadata_path: Path):
+    def __init__(self, event_path: Path, metadata_path: Path, run_id: str):
         self.event_path = Path(event_path)
         self.metadata_path = Path(metadata_path)
-        self.run_id = str(uuid4())
+        self.run_id = run_id
 
         self.event_path.parent.mkdir(parents=True, exist_ok=True)
         self.metadata_path.parent.mkdir(parents=True, exist_ok=True)

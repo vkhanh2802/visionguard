@@ -124,14 +124,28 @@ class LoggingConfig(BaseModel):
     model_config = ConfigDict(extra= "forbid")
 
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    event_jsonl_path: Path = Path("data/outputs/events.jsonl")
-    run_metadata_path: Path = Path("data/outputs/run_metadata.json")
-    
+    event_jsonl_path: Path | None = None
+    run_metadata_path: Path | None = None
+
+    @model_validator(mode="after")
+    def validate_artifact_paths(self):
+        if (self.event_jsonl_path is None) != (self.run_metadata_path is None):
+            raise ValueError(
+                "event_jsonl_path and run_metadata_path must be configured together."
+            )
+
+        return self
+
 class VideoConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     fps_override: float | None = Field(default=None, gt=0.0)
-    
+
+class DatabaseConfig(BaseModel):
+    model_config = ConfigDict(extra = "forbid")
+
+    path: Path = Path("data/visionguard.db")
+
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra = "forbid")
 
@@ -141,6 +155,7 @@ class AppConfig(BaseModel):
     video: VideoConfig = Field(default_factory=VideoConfig)
     output: OutputConfig
     logging: LoggingConfig
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
 def load_config(path: str | Path) -> AppConfig:
     config_path = Path(path)

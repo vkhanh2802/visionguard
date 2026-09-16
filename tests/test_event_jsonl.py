@@ -12,6 +12,7 @@ def test_writes_event_as_one_json_line(tmp_path):
     writer = EventJsonlWriter(
         event_path=tmp_path / "events.jsonl",
         metadata_path=tmp_path / "metadata.json",
+        run_id="run-1",
     )
 
     event = Event(
@@ -50,6 +51,7 @@ def test_writes_numpy_event_coordinates_as_json_numbers(tmp_path):
     writer = EventJsonlWriter(
         event_path=tmp_path / "events.jsonl",
         metadata_path=tmp_path / "metadata.json",
+        run_id="run-1",
     )
 
     event = Event(
@@ -75,6 +77,7 @@ def test_writes_run_metadata(tmp_path):
     writer = EventJsonlWriter(
         event_path=tmp_path / "events.jsonl",
         metadata_path=tmp_path / "metadata.json",
+        run_id="run-1",
     )
 
     result = PipelineResult(

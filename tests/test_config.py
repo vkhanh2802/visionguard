@@ -57,6 +57,7 @@ def valid_config_data() -> dict:
         "logging": {
             "level": "INFO",
             "event_jsonl_path": "data/outputs/events.jsonl",
+            "run_metadata_path": "data/outputs/run_metadata.json",
         },
     }
 
@@ -158,6 +159,14 @@ def test_rejects_unknown_yaml_field(tmp_path: Path, valid_config_data: dict):
     data["detection"]["confidense"] = 0.4
 
     with pytest.raises(ValidationError, match="confidense"):
+        load_config(write_config(tmp_path, data))
+
+
+def test_rejects_partial_jsonl_artifact_paths(tmp_path: Path, valid_config_data: dict):
+    data = deepcopy(valid_config_data)
+    data["logging"]["run_metadata_path"] = None
+
+    with pytest.raises(ValidationError, match="configured together"):
         load_config(write_config(tmp_path, data))
 
 

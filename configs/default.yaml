@@ -40,8 +40,11 @@ output:
 
 logging:
   level: INFO
-  event_jsonl_path: data/outputs/events.jsonl
-  run_metadata_path: data/outputs/run_metadata.json
+  event_jsonl_path: null
+  run_metadata_path: null
 
 video:
   fps_override: null
+
+database:
+  path: data/visionguard.db
