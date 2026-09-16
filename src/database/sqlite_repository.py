@@ -226,25 +226,49 @@ class SQLiteRepository:
 
         return dict(row) if row is not None else None
 
+    def list_runs(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, object]]:
+        self._validate_pagination(limit, offset)
+
+        with closing(self._connect()) as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM analysis_runs
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
     def list_events(
         self,
-        run_id: str,
+        run_id: str | None = None,
         event_type: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, object]]:
-        if limit < 1:
-            raise ValueError("limit must be at least 1")
+        self._validate_pagination(limit, offset)
 
-        if offset < 0:
-            raise ValueError("offset must be non-negative")
+        conditions = []
+        parameters: list[object] = []
 
-        query = "SELECT * FROM events WHERE run_id = ?"
-        parameters: list[object] = [run_id]
+        if run_id is not None:
+            conditions.append("run_id = ?")
+            parameters.append(run_id)
 
         if event_type is not None:
-            query += " AND event_type = ?"
+            conditions.append("event_type = ?")
             parameters.append(event_type)
+
+        query = "SELECT * FROM events"
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
 
         query += " ORDER BY video_timestamp, event_id LIMIT ? OFFSET ?"
         parameters.extend([limit, offset])
@@ -253,6 +277,23 @@ class SQLiteRepository:
             rows = connection.execute(query, parameters).fetchall()
 
         return [dict(row) for row in rows]
+
+    def is_healthy(self) -> bool:
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("SELECT 1").fetchone()
+        except sqlite3.Error:
+            return False
+
+        return True
+
+    @staticmethod
+    def _validate_pagination(limit: int, offset: int) -> None:
+        if limit < 1:
+            raise ValueError("limit must be at least 1")
+
+        if offset < 0:
+            raise ValueError("offset must be non-negative")
 
     @staticmethod
     def _utc_now() -> str:

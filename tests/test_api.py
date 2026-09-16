@@ -1,0 +1,70 @@
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from src.api.app import create_app
+from src.database import SQLiteRepository
+from src.events import Event
+
+
+def create_client(tmp_path: Path) -> TestClient:
+    database_path = tmp_path / "visionguard.db"
+    repository = SQLiteRepository(database_path)
+    repository.create_run("run-1", "input.mp4", "output.mp4", {})
+    repository.record_event(
+        "run-1",
+        Event(
+            event_type="intrusion",
+            track_id=7,
+            timestamp=5.0,
+            position=(100, 200),
+            zone_id="restricted-zone-1",
+        ),
+        frame_id=150,
+    )
+
+    return TestClient(create_app(database_path))
+
+
+def test_health_returns_database_status(tmp_path: Path):
+    response = create_client(tmp_path).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "connected"}
+
+
+def test_lists_runs(tmp_path: Path):
+    response = create_client(tmp_path).get("/runs")
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["run_id"] == "run-1"
+
+
+def test_gets_run_by_id(tmp_path: Path):
+    response = create_client(tmp_path).get("/runs/run-1")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+
+
+def test_returns_404_for_unknown_run(tmp_path: Path):
+    response = create_client(tmp_path).get("/runs/missing")
+
+    assert response.status_code == 404
+
+
+def test_filters_events(tmp_path: Path):
+    response = create_client(tmp_path).get(
+        "/events",
+        params={"run_id": "run-1", "event_type": "intrusion"},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 1
+    assert response.json()["items"][0]["track_id"] == 7
+
+
+def test_rejects_invalid_pagination(tmp_path: Path):
+    response = create_client(tmp_path).get("/events", params={"limit": 0})
+
+    assert response.status_code == 422
