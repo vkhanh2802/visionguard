@@ -38,10 +38,10 @@ Current script settings provide configuration context:
 | Line-crossing confirmation | `3` frames |
 
 The last two settings apply to line crossing, not intrusion stabilization.
-Per-run commands, model overrides, dependency versions, hardware, and the exact
-code revision were not recorded in the survey. Consequently, current defaults
-are not asserted to be an independently verified configuration snapshot of all
-three historical runs.
+The original survey did not retain per-run commands, dependency versions, hardware,
+or exact code revisions. Week 5 now preserves resolved configuration and run
+metadata, while the baseline ROIs and settings are stored in camera-specific YAML
+files under `configs/week4_video_{a,b,c}.yaml`.
 
 | Video | Local output | Resolution | Encoded FPS | Frames | Duration |
 | ----- | ------------ | ---------- | ----------: | -----: | -------: |
@@ -200,13 +200,13 @@ The partly out-of-frame ROI limits what can be observed and annotated.
 
 1. Obtain the original local source clip. Videos are ignored by Git and are not
    distributed with this repository.
-2. Set `RESTRICTED_ZONE` in `scripts/run_video.py` to the corresponding ROI above.
-   Keep the source coordinate system unchanged, or transform the ROI if resizing.
-3. Set `LOITERING_THRESHOLD_SECONDS = 5.0` and record all other configuration values.
-4. Run the pipeline, replacing the input placeholder and output video letter:
+2. Select the matching `configs/week4_video_a.yaml`,
+   `configs/week4_video_b.yaml`, or `configs/week4_video_c.yaml` file. Keep the
+   source coordinate system unchanged, or transform the ROI if resizing.
+3. Run the pipeline, replacing the input and output placeholders:
 
 ```bash
-python -m scripts.run_video --source path/to/video_A.mp4 --model yolo26n.pt --conf 0.4 --output data/outputs/week4videoA.mp4 --no-display
+python -m scripts.run_video --config configs/week4_video_a.yaml --source path/to/video_A.mp4 --output data/outputs/week5videoA.mp4 --no-display
 python -m pytest tests/ -q
 ```
 
@@ -221,9 +221,9 @@ Expected loitering trigger = annotated visit start + threshold
 Signed trigger delay      = predicted trigger time - expected trigger time
 ```
 
-Record the exact commit, command, dependency versions, device, and model for each
-rerun. The current survey lacks those run artifacts, so exact reproduction of the
-historical results is not guaranteed.
+Record the exact commit, dependency versions, device, and model for each rerun.
+The JSONL and metadata artifacts retain event timestamps, config, run ID, and
+summary counters for the current config-driven pipeline.
 
 Tests exist for geometry, line crossing, intrusion, loitering, and integration.
 This documentation update does not certify a new full-suite pass. Remaining
@@ -232,7 +232,22 @@ cleanup validation should explicitly cover continuous observations with
 N+1 missing frames; elapsed frame distance and actual missing-frame count differ
 when a track returns.
 
-## 8. Conclusion and Next Steps
+## 8. Week 5 Refactor Regression
+
+The three Week 4 clips were rerun through the YAML-configured `VideoPipeline` with
+separate JSONL and metadata artifacts. Intrusion and loitering counts matched the
+pre-refactor baseline in every clip.
+
+| Video | Week 4 Intrusion | Week 5 Intrusion | Week 4 Loitering | Week 5 Loitering | Status |
+| ----- | ----------------: | ----------------: | ----------------: | ----------------: | ------ |
+| A | 5 | 5 | 0 | 0 | Matched |
+| B | 12 | 12 | 1 | 1 | Matched |
+| C | 2 | 2 | 0 | 0 | Matched |
+
+This comparison confirms count-level behavior was preserved by the refactor. The
+JSONL event stream also enables future comparisons at frame/timestamp level.
+
+## 9. Conclusion and Next Steps
 
 The Week 4 baseline integrates polygon intrusion and dwell-time loitering alongside
 line crossing, with visual output and manual evaluation on three videos.
@@ -247,5 +262,5 @@ Before treating the milestone as fully validated:
 
 Next experiments should address stable ROI entry/exit transitions and add more
 positive loitering scenarios, including occlusion, re-entry, and threshold-boundary
-cases. Week 5 can then focus on configuration, pipeline organization, and structured
-logging while retaining these results as the pre-refactor baseline.
+cases. The config-driven pipeline, JSONL events, and run metadata are ready for the
+FastAPI and persistence work planned for Week 6.

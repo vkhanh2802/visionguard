@@ -33,10 +33,21 @@ The current baseline includes three independent event engines, annotated video o
 and a three-video evaluation. See [Week 4 evaluation](docs/week4_evaluation.md)
 for results, failure analysis, and remaining validation items.
 
+Week 5 completed: YAML configuration, a reusable `VideoPipeline`, structured logging,
+JSONL event persistence, run metadata, and regression checks against the Week 4
+video baseline. See [architecture](docs/architecture.md) for module responsibilities
+and runtime data flow.
+
 ## Pipeline
 
 ```text
-Video
+CLI + YAML Config
+  |
+  v
+VideoPipeline
+  |
+  v
+OpenCV VideoCapture
   |
   v
 YOLO
@@ -54,10 +65,10 @@ Track[]
 Event[]
   |
   v
-Counters + Console Logging + Visualization
+Counters + Console Logging + Visualization + Event JSONL
   |
   v
-Annotated Output Video
+Annotated Output Video + Run Metadata JSON
 ```
 
 ## Installation
@@ -67,17 +78,71 @@ conda env create -f environment.yml
 conda activate visionguard
 ```
 
+## Configuration
+
+VisionGuard uses validated YAML configuration. The available Week 4 baseline
+configs are camera-specific and use coordinates in the original video frame:
+
+```text
+configs/default.yaml
+configs/week4_video_a.yaml
+configs/week4_video_b.yaml
+configs/week4_video_c.yaml
+```
+
+Each config specifies the model, confidence threshold, line, ROI polygon, event
+thresholds, output codec, and event artifact paths. CLI values explicitly supplied
+by the user override YAML values.
+
+```text
+CLI override > YAML config > model default
+```
+
 ## Usage
 
 ```bash
-python -m scripts.run_video --source data/videos/test.mp4
+python -m scripts.run_video --config configs/week4_video_a.yaml --source data/videos/videoA.mp4 --output data/outputs/week5_videoA.mp4 --no-display
 ```
 
-## Example
+## CLI Overrides
 
 ```bash
-python -m scripts.run_video --source data/videos/test.mp4 --conf 0.4 --output data/outputs/output.mp4
+python -m scripts.run_video --config configs/week4_video_a.yaml --source data/videos/videoA.mp4 --output data/outputs/week5_videoA_conf_05.mp4 --conf 0.5 --no-display
 ```
+
+`--conf`, `--model`, and `--no-display` override their config counterparts for the
+current run only. Input videos and generated artifacts are ignored by Git.
+
+## Output Artifacts
+
+Each configured run produces an annotated output video and two structured files:
+
+```text
+data/outputs/week5_videoA.mp4
+data/outputs/week4videoA.events.jsonl
+data/outputs/week4videoA.metadata.json
+```
+
+`events.jsonl` contains one record per emitted event. After a successful run,
+`metadata.json` stores the resolved configuration, output summary, counters, FPS
+metrics, and whether preview was stopped early.
+
+```json
+{
+  "run_id": "uuid",
+  "frame_id": 139,
+  "event_type": "intrusion",
+  "track_id": 2,
+  "video_timestamp": 4.63,
+  "position": {"x": 480, "y": 732},
+  "direction": null,
+  "zone_id": "restricted-zone-1",
+  "duration_seconds": null
+}
+```
+
+`video_timestamp` is time within the source video; `logged_at` in each JSONL record
+is the wall-clock time when VisionGuard wrote the event.
 
 ## Tracking Confidence Experiment
 
@@ -306,13 +371,11 @@ Full ROI coordinates, clip metadata, methodology, and follow-ups are documented 
 
 ### Running the Week 4 Baseline
 
-Set `RESTRICTED_ZONE`, `LINE_START`, `LINE_END`, and
-`LOITERING_THRESHOLD_SECONDS` in `scripts/run_video.py` for the selected video.
-ROI coordinates are in original-frame pixels and are camera-specific. The report
-contains the three evaluated ROIs; the current script is configured for video C.
+Use the corresponding YAML configuration. ROI coordinates are in original-frame
+pixels and are camera-specific.
 
 ```bash
-python -m scripts.run_video --source path/to/video.mp4 --model yolo26n.pt --conf 0.4 --output data/outputs/week4_demo.mp4 --no-display
+python -m scripts.run_video --config configs/week4_video_a.yaml --source data/videos/videoA.mp4 --output data/outputs/week5_videoA.mp4 --no-display
 python -m pytest tests/ -q
 ```
 
@@ -320,6 +383,17 @@ Replace the source path with your local video. The local demo outputs are
 `data/outputs/week4videoA.mp4`, `data/outputs/week4videoB.mp4`, and
 `data/outputs/week4videoC.mp4`. Input/output videos are ignored by Git and are not
 bundled with a clone of this repository.
+
+### Week 5 Regression Check
+
+The Week 4 baseline was rerun through the config-driven pipeline. The intrusion and
+loitering counts matched all three pre-refactor runs.
+
+| Video | Week 4 Intrusion | Week 5 Intrusion | Week 4 Loitering | Week 5 Loitering | Status |
+| ----- | ----------------: | ----------------: | ----------------: | ----------------: | ------ |
+| A | 5 | 5 | 0 | 0 | Matched |
+| B | 12 | 12 | 1 | 1 | Matched |
+| C | 2 | 2 | 0 | 0 | Matched |
 
 ### Remaining Validation and Improvements
 

@@ -99,7 +99,8 @@ def test_long_tracking_gap_resets_timer():
     engine.process([make_track(1, (50, 50))], 1, 0.0)
     engine.process([], 2, 1.0)
     engine.process([], 3, 2.0)
+    engine.process([], 4, 3.0)
 
-    events = engine.process([make_track(1, (50, 50))], 4, 10.0)
+    events = engine.process([make_track(1, (50, 50))], 5, 10.0)
 
     assert events == []

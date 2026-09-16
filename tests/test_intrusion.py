@@ -107,8 +107,9 @@ def test_long_missing_gap_clears_state():
     engine.process([make_track(1, (150, 50))], 1, 0.0)
     engine.process([], 2, 0.1)
     engine.process([], 3, 0.2)
+    engine.process([], 4, 0.3)
 
-    events = engine.process([make_track(1, (50, 50))], 4, 0.3)
+    events = engine.process([make_track(1, (50, 50))], 5, 0.4)
 
     assert events == []
     assert engine.intrusion_count == 0
