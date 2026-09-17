@@ -1,4 +1,6 @@
+import importlib
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -66,5 +68,52 @@ def test_filters_events(tmp_path: Path):
 
 def test_rejects_invalid_pagination(tmp_path: Path):
     response = create_client(tmp_path).get("/events", params={"limit": 0})
+
+    assert response.status_code == 422
+
+
+def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
+    database_path = tmp_path / "visionguard.db"
+    captured = {}
+    api_module = importlib.import_module("src.api.app")
+
+    def fake_create_analysis_job(**kwargs):
+        captured["config"] = kwargs["config"]
+        captured["source_path"] = kwargs["source_path"]
+        captured["output_path"] = kwargs["output_path"]
+        return SimpleNamespace(run_id="run-analysis")
+
+    def fake_run_background_analysis(job):
+        captured["background_run_id"] = job.run_id
+
+    monkeypatch.setattr(api_module, "create_analysis_job", fake_create_analysis_job)
+    monkeypatch.setattr(api_module, "run_background_analysis", fake_run_background_analysis)
+    client = TestClient(create_app(database_path))
+
+    response = client.post(
+        "/analyze",
+        json={
+            "source_path": "data/videos/test.mp4",
+            "output_path": "data/outputs/api-output.mp4",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json() == {"run_id": "run-analysis", "status": "running"}
+    assert captured["source_path"] == "data/videos/test.mp4"
+    assert captured["output_path"] == "data/outputs/api-output.mp4"
+    assert not captured["config"].output.display
+    assert captured["background_run_id"] == "run-analysis"
+
+
+def test_rejects_missing_analysis_config(tmp_path: Path):
+    response = TestClient(create_app(tmp_path / "visionguard.db")).post(
+        "/analyze",
+        json={
+            "source_path": "input.mp4",
+            "output_path": "output.mp4",
+            "config_path": "configs/missing.yaml",
+        },
+    )
 
     assert response.status_code == 422

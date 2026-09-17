@@ -1,16 +1,12 @@
 import argparse
 from pathlib import Path
-from uuid import uuid4
 
-import logging 
 from src.database import SQLiteRepository
-from src.event_jsonl import EventJsonlWriter
 from src.logging_config import configure_logging
 
+from src.analysis_service import create_analysis_job, execute_analysis_job
 from src.config import AppConfig, load_config
-from src.events import Event
-from src.pipeline import PipelineResult, VideoPipeline
-from src.run_recorder import RunRecorder
+from src.pipeline import PipelineResult
 
 
 def parse_args() -> argparse.Namespace:
@@ -71,26 +67,6 @@ def apply_cli_overrides(
     return AppConfig.model_validate(data)
 
 
-def handle_event(
-    event: Event,
-    frame_id: int,
-    recorder: RunRecorder,
-    logger: logging.Logger,
-) -> None:
-    recorder.record_event(event, frame_id)
-
-    logger.info(
-        "event=%s track_id=%s frame_id=%s video_timestamp=%.2f "
-        "direction=%s zone_id=%s duration_seconds=%s",
-        event.event_type,
-        event.track_id,
-        frame_id,
-        event.timestamp,
-        event.direction,
-        event.zone_id,
-        event.duration_seconds,
-    )
-
 def print_summary(result: PipelineResult) -> None:
     print()
     print("Processing completed")
@@ -120,62 +96,21 @@ def main() -> None:
     logger = configure_logging(config.logging.level)
     source_path = Path(args.source)
     output_path = Path(args.output)
-    config_data = config.model_dump(mode="json")
-    run_id = str(uuid4())
     repository = SQLiteRepository(config.database.path)
-
-    event_writer = None
-    if config.logging.event_jsonl_path is not None:
-        event_writer = EventJsonlWriter(
-            event_path=config.logging.event_jsonl_path,
-            metadata_path=config.logging.run_metadata_path,
-            run_id=run_id,
-        )
-
-    recorder = None
-
+    job = create_analysis_job(
+        config=config,
+        source_path=source_path,
+        output_path=output_path,
+        repository=repository,
+        logger=logger,
+    )
     try:
-        recorder = RunRecorder(
-            repository=repository,
-            run_id=run_id,
-            source_path=source_path,
-            output_path=output_path,
-            config_data=config_data,
-            event_writer=event_writer,
-        )
-
-        pipeline = VideoPipeline(
-            config=config,
-            event_handler=lambda event, frame_id: handle_event(
-                event,
-                frame_id,
-                recorder,
-                logger,
-            ),
-        )
-
-        result = pipeline.run(
-            source_path=source_path,
-            output_path=output_path,
-        )
-
-        recorder.complete(
-            result=result,
-            config_data=config_data,
-        )
-
-        print_summary(result)
-    except Exception as error:
-        if recorder is not None:
-            recorder.fail(error)
-
+        result = execute_analysis_job(job)
+    except Exception:
         logger.exception("Pipeline failed")
         raise
-    finally:
-        if recorder is not None:
-            recorder.close()
-        elif event_writer is not None:
-            event_writer.close()
+
+    print_summary(result)
 
 if __name__ == "__main__":
     main()

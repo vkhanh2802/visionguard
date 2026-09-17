@@ -1,9 +1,12 @@
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 
+from src.analysis_service import create_analysis_job, run_background_analysis
 from src.api.dependencies import get_repository
 from src.api.schemas import (
+    AnalyzeAcceptedResponse,
+    AnalyzeRequest,
     EventListResponse,
     EventResponse,
     HealthResponse,
@@ -11,6 +14,7 @@ from src.api.schemas import (
     RunResponse,
 )
 from src.database import SQLiteRepository
+from src.config import AppConfig, load_config
 
 
 def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
@@ -77,7 +81,38 @@ def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
             offset=offset,
         )
 
+    @app.post(
+        "/analyze",
+        response_model=AnalyzeAcceptedResponse,
+        status_code=202,
+    )
+    def analyze(
+        request: AnalyzeRequest,
+        background_tasks: BackgroundTasks,
+        repository: SQLiteRepository = Depends(get_repository),
+    ) -> AnalyzeAcceptedResponse:
+        try:
+            config = _load_api_config(request.config_path)
+            job = create_analysis_job(
+                config=config,
+                source_path=request.source_path,
+                output_path=request.output_path,
+                repository=repository,
+            )
+        except (FileNotFoundError, ValueError) as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+
+        background_tasks.add_task(run_background_analysis, job)
+        return AnalyzeAcceptedResponse(run_id=job.run_id, status="running")
+
     return app
+
+
+def _load_api_config(config_path: str) -> AppConfig:
+    config = load_config(config_path)
+    config_data = config.model_dump(mode="python")
+    config_data["output"]["display"] = False
+    return AppConfig.model_validate(config_data)
 
 
 app = create_app()

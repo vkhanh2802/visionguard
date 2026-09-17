@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -54,3 +54,14 @@ class EventListResponse(BaseModel):
     items: list[EventResponse]
     limit: int
     offset: int
+
+
+class AnalyzeRequest(BaseModel):
+    source_path: str = Field(min_length=1)
+    output_path: str = Field(min_length=1)
+    config_path: str = "configs/default.yaml"
+
+
+class AnalyzeAcceptedResponse(BaseModel):
+    run_id: str
+    status: Literal["running"]
