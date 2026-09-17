@@ -48,14 +48,33 @@ POST /analyze
 Content-Type: application/json
 
 {
-  "source_path": "data/videos/test.mp4",
-  "output_path": "data/outputs/api-output.mp4",
-  "config_path": "configs/default.yaml"
+  "source_path": "C:/VisionGuard/videos/test.mp4",
+  "output_path": "C:/VisionGuard/outputs/api-output.mp4",
+  "config_path": "C:/VisionGuard/configs/default.yaml"
 }
 ```
 
-`config_path` is optional and defaults to `configs/default.yaml`. The API always
+`config_path` is optional and defaults to `C:/VisionGuard/configs/default.yaml`. The API always
 disables the OpenCV preview window, regardless of the YAML `output.display` setting.
+
+For trusted local use, the default path policy permits:
+
+```text
+Source videos: C:\VisionGuard\videos\
+Output videos: C:\VisionGuard\outputs\
+Configuration: C:\VisionGuard\configs\
+```
+
+The API resolves every requested path and rejects paths outside these roots with `422`.
+Override the defaults before starting Uvicorn when another local storage layout is
+needed:
+
+```powershell
+$env:VISIONGUARD_SOURCE_ROOT = "C:\camera-input"
+$env:VISIONGUARD_OUTPUT_ROOT = "C:\camera-output"
+$env:VISIONGUARD_CONFIG_ROOT = "C:\visionguard-configs"
+$env:VISIONGUARD_ALLOWED_ORIGINS = "http://127.0.0.1:5173"
+```
 
 Successful acceptance:
 
@@ -138,3 +157,11 @@ analysis_runs: lifecycle, config, paths, metrics, counters, errors
 
 JSONL event and metadata files are optional exports. Configure both logging paths to
 enable them; they share the SQLite `run_id` but are not read by the API.
+
+## Browser Access
+
+The API allows CORS requests from the Vite development dashboard at
+`http://127.0.0.1:5173` and `http://localhost:5173`. Configure
+`VISIONGUARD_ALLOWED_ORIGINS` with a comma-separated list before serving the dashboard
+from another origin. The Vite development server also proxies `/api` to FastAPI, so the
+default local dashboard works without a browser cross-origin request.

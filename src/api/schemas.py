@@ -67,7 +67,7 @@ class EventListResponse(BaseModel):
 class AnalyzeRequest(BaseModel):
     source_path: str = Field(min_length=1)
     output_path: str = Field(min_length=1)
-    config_path: str = "configs/default.yaml"
+    config_path: str = "C:/VisionGuard/configs/default.yaml"
 
 
 class AnalyzeAcceptedResponse(BaseModel):

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
+from src.api.settings import ApiSettings
 from src.database import SQLiteRepository
 from src.events import Event
 from src.pipeline import PipelineResult
@@ -96,7 +97,14 @@ def test_downloads_completed_run_output(tmp_path: Path):
         ),
     )
 
-    response = TestClient(create_app(database_path)).get("/runs/run-1/output")
+    settings = ApiSettings(
+        source_root=tmp_path,
+        output_root=tmp_path,
+        config_root=Path("configs"),
+    )
+    response = TestClient(create_app(database_path, settings)).get(
+        "/runs/run-1/output"
+    )
 
     assert response.status_code == 200
     assert response.content == output_content
@@ -170,15 +178,17 @@ def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
     response = client.post(
         "/analyze",
         json={
-            "source_path": "data/videos/test.mp4",
-            "output_path": "data/outputs/api-output.mp4",
+            "source_path": "C:/VisionGuard/videos/test.mp4",
+            "output_path": "C:/VisionGuard/outputs/api-output.mp4",
         },
     )
 
     assert response.status_code == 202
     assert response.json() == {"run_id": "run-analysis", "status": "running"}
-    assert captured["source_path"] == "data/videos/test.mp4"
-    assert captured["output_path"] == "data/outputs/api-output.mp4"
+    assert captured["source_path"] == Path("C:/VisionGuard/videos/test.mp4").resolve()
+    assert captured["output_path"] == Path(
+        "C:/VisionGuard/outputs/api-output.mp4"
+    ).resolve()
     assert not captured["config"].output.display
     assert captured["background_run_id"] == "run-analysis"
 
@@ -194,6 +204,63 @@ def test_rejects_missing_analysis_config(tmp_path: Path):
     )
 
     assert response.status_code == 422
+
+
+def test_rejects_analysis_paths_outside_configured_roots(tmp_path: Path):
+    source_root = tmp_path / "videos"
+    output_root = tmp_path / "outputs"
+    source_root.mkdir()
+    output_root.mkdir()
+    settings = ApiSettings(
+        source_root=source_root,
+        output_root=output_root,
+        config_root=Path("configs"),
+    )
+    client = TestClient(create_app(tmp_path / "visionguard.db", settings))
+
+    response = client.post(
+        "/analyze",
+        json={
+            "source_path": str(tmp_path / "outside.mp4"),
+            "output_path": str(output_root / "output.mp4"),
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Source video path must be inside" in response.json()["detail"]
+
+
+def test_allows_dashboard_cors_origin(tmp_path: Path):
+    response = TestClient(create_app(tmp_path / "visionguard.db")).options(
+        "/runs",
+        headers={
+            "Origin": "http://127.0.0.1:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:5173"
+
+
+def test_loads_api_settings_from_environment(monkeypatch):
+    monkeypatch.setenv("VISIONGUARD_SOURCE_ROOT", "custom/videos")
+    monkeypatch.setenv("VISIONGUARD_OUTPUT_ROOT", "custom/outputs")
+    monkeypatch.setenv("VISIONGUARD_CONFIG_ROOT", "custom/configs")
+    monkeypatch.setenv(
+        "VISIONGUARD_ALLOWED_ORIGINS",
+        "https://dashboard.example, http://localhost:5173",
+    )
+
+    settings = ApiSettings.from_environment()
+
+    assert settings.source_root == Path("custom/videos")
+    assert settings.output_root == Path("custom/outputs")
+    assert settings.config_root == Path("custom/configs")
+    assert settings.allowed_origins == (
+        "https://dashboard.example",
+        "http://localhost:5173",
+    )
 
 
 def test_startup_marks_interrupted_runs_as_failed(tmp_path: Path):

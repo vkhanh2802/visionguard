@@ -3,10 +3,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from src.analysis_service import create_analysis_job, run_background_analysis
-from src.api.dependencies import get_repository
+from src.api.dependencies import get_repository, get_settings
+from src.api.settings import ApiSettings
 from src.api.schemas import (
     ApiIndexResponse,
     AnalyzeAcceptedResponse,
@@ -23,8 +25,12 @@ from src.database import SQLiteRepository
 from src.config import AppConfig, load_config
 
 
-def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
+def create_app(
+    database_path: str | Path = "data/visionguard.db",
+    settings: ApiSettings | None = None,
+) -> FastAPI:
     repository = SQLiteRepository(database_path)
+    settings = settings or ApiSettings.from_environment()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -46,6 +52,14 @@ def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
         lifespan=lifespan,
     )
     app.state.repository = repository
+    app.state.settings = settings
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.allowed_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
     @app.get("/", response_model=ApiIndexResponse)
     def index() -> ApiIndexResponse:
@@ -97,6 +111,7 @@ def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
     def download_run_output(
         run_id: str,
         repository: SQLiteRepository = Depends(get_repository),
+        settings: ApiSettings = Depends(get_settings),
     ) -> FileResponse:
         run = repository.get_run(run_id)
         if run is None:
@@ -108,7 +123,11 @@ def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
                 detail=f"Output is unavailable while run status is {run['status']}.",
             )
 
-        output_path = Path(run["output_path"])
+        try:
+            output_path = settings.output_path(run["output_path"])
+        except ValueError as error:
+            raise HTTPException(status_code=404, detail="Output file not found.") from error
+
         if not output_path.is_file():
             raise HTTPException(
                 status_code=404,
@@ -184,13 +203,19 @@ def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
         request: AnalyzeRequest,
         background_tasks: BackgroundTasks,
         repository: SQLiteRepository = Depends(get_repository),
+        settings: ApiSettings = Depends(get_settings),
     ) -> AnalyzeAcceptedResponse:
         try:
-            config = _load_api_config(request.config_path)
+            source_path, output_path, config_path = settings.validate_analysis_paths(
+                request.source_path,
+                request.output_path,
+                request.config_path,
+            )
+            config = _load_api_config(config_path)
             job = create_analysis_job(
                 config=config,
-                source_path=request.source_path,
-                output_path=request.output_path,
+                source_path=source_path,
+                output_path=output_path,
                 repository=repository,
             )
         except (FileNotFoundError, ValueError) as error:

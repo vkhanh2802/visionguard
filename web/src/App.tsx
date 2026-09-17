@@ -10,9 +10,9 @@ import type {
 } from "./types";
 
 const defaultAnalysisRequest: AnalysisRequest = {
-  source_path: "data/videos/test.mp4",
-  output_path: "data/outputs/dashboard-output.mp4",
-  config_path: "configs/default.yaml",
+  source_path: "C:\\VisionGuard\\videos\\test.mp4",
+  output_path: "C:\\VisionGuard\\outputs\\dashboard-output.mp4",
+  config_path: "C:\\VisionGuard\\configs\\default.yaml",
 };
 
 function formatDate(value: string | null): string {
@@ -60,7 +60,12 @@ export function App() {
       ]);
       setHealth(healthResponse.database === "connected" ? "connected" : "offline");
       setRuns(runResponse.items);
-      setSelectedRunId((currentRunId) => currentRunId ?? runResponse.items[0]?.run_id ?? null);
+      setSelectedRunId((currentRunId) => {
+        const currentRunExists = runResponse.items.some(
+          (run) => run.run_id === currentRunId,
+        );
+        return currentRunExists ? currentRunId : runResponse.items[0]?.run_id ?? null;
+      });
       setError(null);
     } catch (requestError) {
       setHealth("offline");

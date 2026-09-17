@@ -103,6 +103,10 @@ Each config specifies the model, confidence threshold, line, ROI polygon, event
 thresholds, output codec, and event artifact paths. CLI values explicitly supplied
 by the user override YAML values.
 
+The repository files above remain version-controlled templates. Runtime API and CLI
+defaults use the copied editable configs in `C:\VisionGuard\configs`; input videos and
+new output videos use `C:\VisionGuard\videos` and `C:\VisionGuard\outputs`.
+
 ```text
 CLI override > YAML config > model default
 ```
@@ -110,7 +114,7 @@ CLI override > YAML config > model default
 ## Usage
 
 ```bash
-python -m scripts.run_video --config configs/week4_video_a.yaml --source data/videos/videoA.mp4 --output data/outputs/week5_videoA.mp4 --no-display
+python -m scripts.run_video --config C:/VisionGuard/configs/week4_video_a.yaml --source C:/VisionGuard/videos/videoA.mp4 --output C:/VisionGuard/outputs/week7_videoA.mp4 --no-display
 ```
 
 ## HTTP API
@@ -140,9 +144,9 @@ with a `running` run ID; poll `GET /runs/{run_id}` until the run becomes `comple
 
 ```json
 {
-  "source_path": "data/videos/test.mp4",
-  "output_path": "data/outputs/api-output.mp4",
-  "config_path": "configs/default.yaml"
+  "source_path": "C:/VisionGuard/videos/test.mp4",
+  "output_path": "C:/VisionGuard/outputs/api-output.mp4",
+  "config_path": "C:/VisionGuard/configs/default.yaml"
 }
 ```
 
@@ -166,10 +170,15 @@ The dashboard provides a form to start analysis jobs, a selectable run list, aut
 polling for active runs, run analytics, event records, error visibility, and completed
 annotated-video download.
 
+For safety, API analysis requests must stay inside `C:\VisionGuard\videos`,
+`C:\VisionGuard\outputs`, and `C:\VisionGuard\configs` by default. See
+[API guide](docs/api.md) for environment variables that change these local roots or
+dashboard CORS origins.
+
 ## CLI Overrides
 
 ```bash
-python -m scripts.run_video --config configs/week4_video_a.yaml --source data/videos/videoA.mp4 --output data/outputs/week5_videoA_conf_05.mp4 --conf 0.5 --no-display
+python -m scripts.run_video --config C:/VisionGuard/configs/week4_video_a.yaml --source C:/VisionGuard/videos/videoA.mp4 --output C:/VisionGuard/outputs/week7_videoA_conf_05.mp4 --conf 0.5 --no-display
 ```
 
 `--conf`, `--model`, and `--no-display` override their config counterparts for the

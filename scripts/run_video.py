@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument(
         "--config",
-        default="configs/default.yaml",
+        default="C:/VisionGuard/configs/default.yaml",
         help="Path to YAML configuration",
     )
     parser.add_argument(
@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output",
-        default="data/outputs/output.mp4",
+        default="C:/VisionGuard/outputs/output.mp4",
         help="Path to annotated output video",
     )
     parser.add_argument(
