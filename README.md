@@ -38,10 +38,19 @@ JSONL event persistence, run metadata, and regression checks against the Week 4
 video baseline. See [architecture](docs/architecture.md) for module responsibilities
 and runtime data flow.
 
+Week 6 completed: SQLite run and event persistence, a FastAPI read/analysis API,
+per-run analytics, annotated-video download, and interrupted-run recovery at API
+startup. See the [Week 6 summary](docs/week6_summary.md) and [API guide](docs/api.md).
+
 ## Pipeline
 
 ```text
-CLI + YAML Config
+CLI or FastAPI + YAML Config
+  |
+  v
+AnalysisService + RunRecorder
+  |-- SQLite: analysis_runs + events
+  |-- Optional: Event JSONL + Run Metadata JSON
   |
   v
 VideoPipeline
@@ -65,10 +74,10 @@ Track[]
 Event[]
   |
   v
-Counters + Console Logging + Visualization + Event JSONL
+Counters + Console Logging + Visualization
   |
   v
-Annotated Output Video + Run Metadata JSON
+Annotated Output Video
 ```
 
 ## Installation
@@ -104,6 +113,59 @@ CLI override > YAML config > model default
 python -m scripts.run_video --config configs/week4_video_a.yaml --source data/videos/videoA.mp4 --output data/outputs/week5_videoA.mp4 --no-display
 ```
 
+## HTTP API
+
+Start the local API server from the project root:
+
+```bash
+python -m uvicorn src.api.app:app --reload
+```
+
+Open `http://127.0.0.1:8000/docs` for Swagger UI. The root endpoint at
+`http://127.0.0.1:8000/` lists the main API paths.
+
+| Method | Path | Purpose |
+| ------ | ---- | ------- |
+| `GET` | `/health` | Verify SQLite availability. |
+| `GET` | `/runs` | List persisted video-analysis runs. |
+| `GET` | `/runs/{run_id}` | Get one run and its lifecycle status. |
+| `GET` | `/runs/{run_id}/analytics` | Get counters and event aggregates. |
+| `GET` | `/runs/{run_id}/output` | Download a completed annotated video. |
+| `GET` | `/events` | List events, optionally filtered by `run_id` or `event_type`. |
+| `POST` | `/analyze` | Start an analysis job and return a `run_id`. |
+
+`POST /analyze` runs inference in a FastAPI background task. It returns `202 Accepted`
+with a `running` run ID; poll `GET /runs/{run_id}` until the run becomes `completed` or
+`failed`.
+
+```json
+{
+  "source_path": "data/videos/test.mp4",
+  "output_path": "data/outputs/api-output.mp4",
+  "config_path": "configs/default.yaml"
+}
+```
+
+See [API guide](docs/api.md) for request examples, lifecycle behavior, and error codes.
+
+## Dashboard
+
+The React + Vite dashboard is in `web/`. Start the FastAPI server first, then start
+the dashboard in a second terminal:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`. The Vite development server proxies `/api` requests to
+`http://127.0.0.1:8000`, so local browser requests do not require a CORS setting.
+
+The dashboard provides a form to start analysis jobs, a selectable run list, automatic
+polling for active runs, run analytics, event records, error visibility, and completed
+annotated-video download.
+
 ## CLI Overrides
 
 ```bash
@@ -113,19 +175,29 @@ python -m scripts.run_video --config configs/week4_video_a.yaml --source data/vi
 `--conf`, `--model`, and `--no-display` override their config counterparts for the
 current run only. Input videos and generated artifacts are ignored by Git.
 
-## Output Artifacts
+## Persistence and Output Artifacts
 
-Each configured run produces an annotated output video and two structured files:
+SQLite is the source of truth for every run and emitted event. The default database is:
 
 ```text
-data/outputs/week5_videoA.mp4
-data/outputs/week4videoA.events.jsonl
-data/outputs/week4videoA.metadata.json
+data/visionguard.db
 ```
 
-`events.jsonl` contains one record per emitted event. After a successful run,
-`metadata.json` stores the resolved configuration, output summary, counters, FPS
-metrics, and whether preview was stopped early.
+It contains `analysis_runs` for run lifecycle and final metrics, plus `events` for
+individual line-crossing, intrusion, and loitering events. The database and generated
+videos are ignored by Git.
+
+JSONL and metadata remain optional artifacts. They are written only when both logging
+paths are configured:
+
+```text
+event_jsonl_path
+run_metadata_path
+```
+
+When enabled, JSONL shares the same `run_id` as SQLite. `events.jsonl` contains one
+record per emitted event; `metadata.json` stores the resolved configuration and final
+run summary.
 
 ```json
 {

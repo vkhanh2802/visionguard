@@ -8,6 +8,14 @@ class HealthResponse(BaseModel):
     database: Literal["connected"]
 
 
+class ApiIndexResponse(BaseModel):
+    service: Literal["VisionGuard API"]
+    docs_url: str
+    health_url: str
+    runs_url: str
+    events_url: str
+
+
 class RunResponse(BaseModel):
     run_id: str
     source_path: str
@@ -65,3 +73,23 @@ class AnalyzeRequest(BaseModel):
 class AnalyzeAcceptedResponse(BaseModel):
     run_id: str
     status: Literal["running"]
+
+
+class EventAnalyticsResponse(BaseModel):
+    recorded_event_count: int
+    unique_track_count: int
+    first_event_timestamp: float | None
+    last_event_timestamp: float | None
+    by_type: dict[str, int]
+
+
+class RunAnalyticsResponse(BaseModel):
+    run_id: str
+    status: Literal["running", "completed", "failed"]
+    processed_frames: int | None
+    in_count: int | None
+    out_count: int | None
+    net_count: int | None
+    intrusion_count: int | None
+    loitering_count: int | None
+    events: EventAnalyticsResponse

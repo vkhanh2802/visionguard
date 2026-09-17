@@ -1,15 +1,21 @@
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from src.analysis_service import create_analysis_job, run_background_analysis
 from src.api.dependencies import get_repository
 from src.api.schemas import (
+    ApiIndexResponse,
     AnalyzeAcceptedResponse,
     AnalyzeRequest,
+    EventAnalyticsResponse,
     EventListResponse,
     EventResponse,
     HealthResponse,
+    RunAnalyticsResponse,
     RunListResponse,
     RunResponse,
 )
@@ -18,12 +24,38 @@ from src.config import AppConfig, load_config
 
 
 def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
+    repository = SQLiteRepository(database_path)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        recovered_run_count = repository.fail_interrupted_runs(
+            "Analysis interrupted because the API process restarted."
+        )
+        if recovered_run_count:
+            logging.getLogger("visionguard").warning(
+                "Marked %s interrupted analysis run(s) as failed.",
+                recovered_run_count,
+            )
+
+        yield
+
     app = FastAPI(
         title="VisionGuard API",
         version="0.1.0",
         description="Video analytics runs and events API.",
+        lifespan=lifespan,
     )
-    app.state.repository = SQLiteRepository(database_path)
+    app.state.repository = repository
+
+    @app.get("/", response_model=ApiIndexResponse)
+    def index() -> ApiIndexResponse:
+        return ApiIndexResponse(
+            service="VisionGuard API",
+            docs_url="/docs",
+            health_url="/health",
+            runs_url="/runs",
+            events_url="/events",
+        )
 
     @app.get("/health", response_model=HealthResponse)
     def health(
@@ -60,6 +92,68 @@ def create_app(database_path: str | Path = "data/visionguard.db") -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
 
         return RunResponse.model_validate(run)
+
+    @app.get("/runs/{run_id}/output")
+    def download_run_output(
+        run_id: str,
+        repository: SQLiteRepository = Depends(get_repository),
+    ) -> FileResponse:
+        run = repository.get_run(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+        if run["status"] != "completed":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Output is unavailable while run status is {run['status']}.",
+            )
+
+        output_path = Path(run["output_path"])
+        if not output_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Output file not found: {output_path}",
+            )
+
+        return FileResponse(path=output_path, filename=output_path.name)
+
+    @app.get(
+        "/runs/{run_id}/analytics",
+        response_model=RunAnalyticsResponse,
+    )
+    def get_run_analytics(
+        run_id: str,
+        repository: SQLiteRepository = Depends(get_repository),
+    ) -> RunAnalyticsResponse:
+        analytics = repository.get_run_analytics(run_id)
+        if analytics is None:
+            raise HTTPException(status_code=404, detail=f"Run not found: {run_id}")
+
+        in_count = analytics["in_count"]
+        out_count = analytics["out_count"]
+        net_count = (
+            int(in_count) - int(out_count)
+            if in_count is not None and out_count is not None
+            else None
+        )
+
+        return RunAnalyticsResponse(
+            run_id=analytics["run_id"],
+            status=analytics["status"],
+            processed_frames=analytics["processed_frames"],
+            in_count=in_count,
+            out_count=out_count,
+            net_count=net_count,
+            intrusion_count=analytics["intrusion_count"],
+            loitering_count=analytics["loitering_count"],
+            events=EventAnalyticsResponse(
+                recorded_event_count=analytics["recorded_event_count"],
+                unique_track_count=analytics["unique_track_count"],
+                first_event_timestamp=analytics["first_event_timestamp"],
+                last_event_timestamp=analytics["last_event_timestamp"],
+                by_type=analytics["event_counts"],
+            ),
+        )
 
     @app.get("/events", response_model=EventListResponse)
     def list_events(

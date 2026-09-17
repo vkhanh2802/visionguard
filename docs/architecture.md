@@ -2,14 +2,19 @@
 
 ## Overview
 
-VisionGuard processes a local video into annotated output video, structured events,
-and run metadata.
+VisionGuard processes a local video into an annotated output video, persisted events,
+and run metadata. SQLite is the persistence source of truth; JSONL is optional.
 
 ```text
-CLI
+CLI or FastAPI
   |
   v
 YAML Config -> AppConfig
+  |
+  v
+AnalysisService -> RunRecorder
+  |-- SQLiteRepository -> analysis_runs + events
+  |-- Optional EventJsonlWriter -> JSONL + metadata
   |
   v
 VideoPipeline
@@ -24,7 +29,7 @@ VideoPipeline
   |-- OpenCV VideoWriter
   |
   v
-PipelineResult + Event JSONL + Run Metadata JSON
+PipelineResult + Annotated Output Video
 ```
 
 ## Module Responsibilities
@@ -37,8 +42,12 @@ PipelineResult + Event JSONL + Run Metadata JSON
 | `src/events/` | Implements line-crossing, intrusion, loitering, geometry, and per-track state. |
 | `src/visualization.py` | Draws overlays only; it does not contain event logic. |
 | `src/event_jsonl.py` | Streams individual events to JSONL and writes run metadata. |
+| `src/database/sqlite_repository.py` | Creates SQLite schema and persists/queries runs, events, analytics, and interrupted runs. |
+| `src/run_recorder.py` | Records a shared `run_id` to SQLite and optional JSONL artifacts. |
+| `src/analysis_service.py` | Creates and executes reusable analysis jobs for both CLI and FastAPI. |
+| `src/api/` | Exposes FastAPI health, runs, events, analysis, analytics, and output-download endpoints. |
 | `src/logging_config.py` | Configures readable application logging. |
-| `scripts/run_video.py` | Parses CLI arguments, resolves overrides, creates the pipeline, and prints a summary. |
+| `scripts/run_video.py` | Parses CLI arguments, resolves overrides, executes an analysis job, and prints a summary. |
 
 ## Runtime Flow
 
@@ -51,7 +60,7 @@ Frame
   -> IntrusionEngine.process()
   -> LoiteringEngine.process()
   -> Event[]
-  -> Event handler -> console logger + events.jsonl
+  -> Event handler -> RunRecorder -> SQLite + optional events.jsonl
   -> Visualization -> annotated output frame
 ```
 
@@ -118,26 +127,28 @@ FPS override instead of silently assuming a value.
 
 ## Persistence
 
-Each run writes two structured artifacts configured under `logging`:
+Each run is persisted in SQLite, by default at `data/visionguard.db`:
 
 ```text
-events.jsonl
-run_metadata.json
+analysis_runs
+events
 ```
 
-`events.jsonl` has one JSON object per emitted event. It supports streaming and
-retains events already written if a later frame fails. Each record contains `run_id`,
-`frame_id`, event type, track ID, video timestamp, position, optional direction,
-zone ID, duration, and wall-clock log time.
+`analysis_runs` stores run lifecycle (`running`, `completed`, or `failed`), paths,
+resolved config JSON, performance metrics, counters, and failure messages. `events`
+stores individual emitted events and references `analysis_runs.run_id`.
 
-After a successful run, `run_metadata.json` records the resolved config, result
-summary, counters, FPS metrics, whether preview was stopped early, source path,
-output path, and run ID. This is sufficient for a later API or database layer to
-associate artifacts from the same run.
+JSONL and run metadata are optional and must be configured together. They use the same
+`run_id` as SQLite. JSONL retains events already written if a later frame fails;
+SQLite records the final failed lifecycle state and error message.
 
 ## API Boundary
 
-A future FastAPI layer should load config, call `VideoPipeline.run()`, and return a
-`PipelineResult` or persisted run metadata. It must not import `scripts/run_video.py`.
-The CLI remains an adapter for local execution; OpenCV preview and console summary
-belong outside the API layer.
+FastAPI uses `AnalysisService`, not `scripts/run_video.py`. `POST /analyze` creates a
+persisted `running` job, then starts `VideoPipeline` in a FastAPI background task.
+Clients poll `GET /runs/{run_id}` and can query events, analytics, or download the
+annotated video after completion.
+
+At API startup, any run left `running` by an interrupted process is marked `failed`.
+This prevents stale status in the current single-process deployment model. See the
+[API guide](api.md) for endpoint behavior and operational constraints.

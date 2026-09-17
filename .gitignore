@@ -11,3 +11,6 @@ runs/
 
 .vscode/
 .idea/
+
+web/node_modules/
+web/dist/

@@ -278,6 +278,67 @@ class SQLiteRepository:
 
         return [dict(row) for row in rows]
 
+    def get_run_analytics(self, run_id: str) -> dict[str, object] | None:
+        with closing(self._connect()) as connection:
+            summary = connection.execute(
+                """
+                SELECT
+                    analysis_runs.run_id,
+                    analysis_runs.status,
+                    analysis_runs.processed_frames,
+                    analysis_runs.in_count,
+                    analysis_runs.out_count,
+                    analysis_runs.intrusion_count,
+                    analysis_runs.loitering_count,
+                    COUNT(events.event_id) AS recorded_event_count,
+                    COUNT(DISTINCT events.track_id) AS unique_track_count,
+                    MIN(events.video_timestamp) AS first_event_timestamp,
+                    MAX(events.video_timestamp) AS last_event_timestamp
+                FROM analysis_runs
+                LEFT JOIN events ON events.run_id = analysis_runs.run_id
+                WHERE analysis_runs.run_id = ?
+                GROUP BY analysis_runs.run_id
+                """,
+                (run_id,),
+            ).fetchone()
+
+            if summary is None:
+                return None
+
+            event_rows = connection.execute(
+                """
+                SELECT event_type, COUNT(*) AS event_count
+                FROM events
+                WHERE run_id = ?
+                GROUP BY event_type
+                ORDER BY event_type
+                """,
+                (run_id,),
+            ).fetchall()
+
+        result = dict(summary)
+        result["event_counts"] = {
+            row["event_type"]: row["event_count"]
+            for row in event_rows
+        }
+        return result
+
+    def fail_interrupted_runs(self, error_message: str) -> int:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE analysis_runs
+                    SET status = 'failed',
+                        completed_at = ?,
+                        error_message = ?
+                    WHERE status = 'running'
+                    """,
+                    (self._utc_now(), error_message),
+                )
+
+        return cursor.rowcount
+
     def is_healthy(self) -> bool:
         try:
             with closing(self._connect()) as connection:
