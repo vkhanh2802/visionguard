@@ -28,6 +28,8 @@ events:
   intrusion:
     enabled: true
     zone_id: restricted-zone-1
+    entry_confirmation_frames: 6
+    exit_confirmation_frames: 6
 
   loitering:
     enabled: true

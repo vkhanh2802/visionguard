@@ -82,6 +82,8 @@ class IntrusionConfig(BaseModel):
 
     enabled: bool = True
     zone_id: str
+    entry_confirmation_frames: int = Field(default=1, ge=1)
+    exit_confirmation_frames: int = Field(default=1, ge=1)
 
 class LoiteringConfig(BaseModel):
     model_config = ConfigDict(extra = "forbid")

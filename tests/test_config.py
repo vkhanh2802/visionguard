@@ -73,6 +73,8 @@ def test_loads_valid_config(tmp_path: Path, valid_config_data: dict):
 
     assert config.detection.confidence == 0.4
     assert config.detection.target_classes == {"person"}
+    assert config.events.intrusion.entry_confirmation_frames == 1
+    assert config.events.intrusion.exit_confirmation_frames == 1
     assert config.events.loitering.dwell_threshold_seconds == 5.0
     assert config.events.zones["restricted-zone-1"].polygon[0] == (100, 100)
 
@@ -83,6 +85,8 @@ def test_default_config_loads():
     config = load_config(project_root / "configs" / "default.yaml")
 
     assert config.events.intrusion.zone_id == "restricted-zone-1"
+    assert config.events.intrusion.entry_confirmation_frames == 6
+    assert config.events.intrusion.exit_confirmation_frames == 6
 
 
 @pytest.mark.parametrize("confidence", [-0.1, 1.1])
@@ -111,6 +115,28 @@ def test_rejects_zero_confirmation_frames(tmp_path: Path, valid_config_data: dic
     data["events"]["line_crossing"]["confirmation_frames"] = 0
 
     with pytest.raises(ValidationError, match="confirmation_frames"):
+        load_config(write_config(tmp_path, data))
+
+
+def test_rejects_zero_intrusion_entry_confirmation_frames(
+    tmp_path: Path,
+    valid_config_data: dict,
+):
+    data = deepcopy(valid_config_data)
+    data["events"]["intrusion"]["entry_confirmation_frames"] = 0
+
+    with pytest.raises(ValidationError, match="entry_confirmation_frames"):
+        load_config(write_config(tmp_path, data))
+
+
+def test_rejects_zero_intrusion_exit_confirmation_frames(
+    tmp_path: Path,
+    valid_config_data: dict,
+):
+    data = deepcopy(valid_config_data)
+    data["events"]["intrusion"]["exit_confirmation_frames"] = 0
+
+    with pytest.raises(ValidationError, match="exit_confirmation_frames"):
         load_config(write_config(tmp_path, data))
 
 

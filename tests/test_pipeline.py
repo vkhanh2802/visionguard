@@ -42,6 +42,8 @@ def test_pipeline_processes_line_intrusion_and_loitering():
         (1, 1.0, (150, 150)),
         (2, 2.0, (150, 150)),
         (3, 3.0, (150, 150)),
+        (4, 4.0, (150, 150)),
+        (5, 5.0, (150, 150)),
         (6, 6.0, (150, 150)),
     ]
 
@@ -58,13 +60,13 @@ def test_pipeline_processes_line_intrusion_and_loitering():
         all_events.extend(events)
 
     assert [event.event_type for event in all_events] == [
-        "intrusion",
         "line_crossing",
+        "intrusion",
         "loitering",
     ]
 
-    assert all_events[0].track_id == 1
-    assert all_events[1].direction == "OUT"
+    assert all_events[0].direction == "OUT"
+    assert all_events[1].track_id == 1
     assert all_events[2].duration_seconds == 5.0
 
     assert line_engine.out_count == 1

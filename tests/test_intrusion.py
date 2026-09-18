@@ -113,3 +113,83 @@ def test_long_missing_gap_clears_state():
 
     assert events == []
     assert engine.intrusion_count == 0
+
+
+def test_requires_configured_consecutive_inside_frames():
+    engine = IntrusionEngine(ROI, entry_confirmation_frames=3)
+
+    engine.process([make_track(1, (150, 50))], 1, 0.0)
+    assert engine.process([make_track(1, (50, 50))], 2, 0.1) == []
+    assert engine.process([make_track(1, (55, 50))], 3, 0.2) == []
+    events = engine.process([make_track(1, (60, 50))], 4, 0.3)
+
+    assert len(events) == 1
+    assert events[0].timestamp == 0.3
+    assert engine.intrusion_count == 1
+
+
+def test_boundary_jitter_resets_pending_entry_confirmation():
+    engine = IntrusionEngine(ROI, entry_confirmation_frames=3)
+
+    engine.process([make_track(1, (150, 50))], 1, 0.0)
+    engine.process([make_track(1, (99, 50))], 2, 0.1)
+    engine.process([make_track(1, (101, 50))], 3, 0.2)
+    engine.process([make_track(1, (99, 50))], 4, 0.3)
+    engine.process([make_track(1, (98, 50))], 5, 0.4)
+    events = engine.process([make_track(1, (97, 50))], 6, 0.5)
+
+    assert len(events) == 1
+    assert events[0].timestamp == 0.5
+
+
+def test_missing_frame_resets_pending_entry_confirmation():
+    engine = IntrusionEngine(ROI, entry_confirmation_frames=3)
+
+    engine.process([make_track(1, (150, 50))], 1, 0.0)
+    engine.process([make_track(1, (50, 50))], 2, 0.1)
+    engine.process([], 3, 0.2)
+    engine.process([make_track(1, (50, 50))], 4, 0.3)
+    engine.process([make_track(1, (50, 50))], 5, 0.4)
+    events = engine.process([make_track(1, (50, 50))], 6, 0.5)
+
+    assert len(events) == 1
+
+
+def test_boundary_jitter_does_not_confirm_exit_or_duplicate_intrusion():
+    engine = IntrusionEngine(
+        ROI,
+        entry_confirmation_frames=3,
+        exit_confirmation_frames=3,
+    )
+
+    engine.process([make_track(1, (150, 50))], 1, 0.0)
+    engine.process([make_track(1, (50, 50))], 2, 0.1)
+    engine.process([make_track(1, (50, 50))], 3, 0.2)
+    first_entry = engine.process([make_track(1, (50, 50))], 4, 0.3)
+
+    engine.process([make_track(1, (101, 50))], 5, 0.4)
+    assert engine.process([make_track(1, (50, 50))], 6, 0.5) == []
+    assert len(first_entry) == 1
+    assert engine.intrusion_count == 1
+
+
+def test_confirmed_exit_allows_a_later_confirmed_reentry():
+    engine = IntrusionEngine(
+        ROI,
+        entry_confirmation_frames=3,
+        exit_confirmation_frames=3,
+    )
+
+    engine.process([make_track(1, (150, 50))], 1, 0.0)
+    engine.process([make_track(1, (50, 50))], 2, 0.1)
+    engine.process([make_track(1, (50, 50))], 3, 0.2)
+    engine.process([make_track(1, (50, 50))], 4, 0.3)
+    engine.process([make_track(1, (150, 50))], 5, 0.4)
+    engine.process([make_track(1, (150, 50))], 6, 0.5)
+    engine.process([make_track(1, (150, 50))], 7, 0.6)
+    engine.process([make_track(1, (50, 50))], 8, 0.7)
+    engine.process([make_track(1, (50, 50))], 9, 0.8)
+    events = engine.process([make_track(1, (50, 50))], 10, 0.9)
+
+    assert len(events) == 1
+    assert engine.intrusion_count == 2

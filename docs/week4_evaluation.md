@@ -36,8 +36,9 @@ Current script settings provide configuration context:
 | Maximum missing frames | `30` |
 | Line-crossing dead zone | `5.0` pixels |
 | Line-crossing confirmation | `3` frames |
+| Intrusion entry confirmation | `6` observed inside frames |
+| Intrusion exit confirmation | `6` observed outside frames |
 
-The last two settings apply to line crossing, not intrusion stabilization.
 The original survey did not retain per-run commands, dependency versions, hardware,
 or exact code revisions. Week 5 now preserves resolved configuration and run
 metadata, while the baseline ROIs and settings are stored in camera-specific YAML
@@ -89,10 +90,14 @@ If the ROI is changed to fit within the image, ground truth must be reassessed.
 ## 3. Event Semantics
 
 - Polygon boundary points count as inside.
-- Intrusion is an observed outside-to-inside transition for the same track ID.
+- Intrusion requires an outside track ID followed by the configured number of
+  consecutive observed inside frames.
 - First observation inside initializes state without an intrusion event.
 - Remaining inside does not create additional intrusion events; exiting and
   re-entering can create another valid intrusion.
+- A boundary exit or missing frame resets a pending entry confirmation. A confirmed
+  intrusion requires the configured consecutive outside frames before a later
+  re-entry can create another alert.
 - Loitering starts at the first observed inside timestamp and triggers when
   duration reaches or exceeds 5 seconds, once per visit.
 - An observed exit resets the visit. Loitering means dwell time in the ROI,
@@ -180,14 +185,12 @@ across the ROI boundary. The resulting observed sequence can be:
 inside -> outside (jitter) -> inside -> duplicate intrusion
 ```
 
-The intrusion engine currently reacts immediately to this transition. Line-crossing
-dead-zone and confirmation settings do not stabilize polygon membership.
-
-Priority improvement: confirm both entry and exit before changing the stable ROI
-state. Retain legitimate re-entry behavior; a permanent one-alert-per-ID rule would
-hide real subsequent visits. Re-evaluate all three clips after any change because
-confirmation may suppress brief valid entries and delay alerts. Boundary jitter
-can also reset a loitering timer, although that failure was not reported here.
+The current intrusion engine requires six consecutive observed inside frames
+before emitting an alert. This filters brief entry-side jitter without using a
+permanent one-alert-per-ID rule, so legitimate later re-entries remain detectable.
+It can delay alerts, exits, and suppress entries shorter than the confirmation
+window. Boundary jitter can also reset a loitering timer, although that failure
+was not reported here.
 
 ### Video C - Correct Counts in a Limited Visible ROI
 
@@ -225,12 +228,8 @@ Record the exact commit, dependency versions, device, and model for each rerun.
 The JSONL and metadata artifacts retain event timestamps, config, run ID, and
 summary counters for the current config-driven pipeline.
 
-Tests exist for geometry, line crossing, intrusion, loitering, and integration.
-This documentation update does not certify a new full-suite pass. Remaining
-cleanup validation should explicitly cover continuous observations with
-`max_missing_frames=0`, a return after exactly N missing frames, and expiry after
-N+1 missing frames; elapsed frame distance and actual missing-frame count differ
-when a track returns.
+Tests cover geometry, line crossing, intrusion, loitering, configuration, and
+integration. The suite passed with 115 tests after the ROI stabilization change.
 
 ## 8. Week 5 Refactor Regression
 
@@ -247,20 +246,36 @@ pre-refactor baseline in every clip.
 This comparison confirms count-level behavior was preserved by the refactor. The
 JSONL event stream also enables future comparisons at frame/timestamp level.
 
-## 9. Conclusion and Next Steps
+## 9. ROI Stabilization Rerun
+
+The three clips were rerun on 2026-09-18 with
+`entry_confirmation_frames: 6` and `exit_confirmation_frames: 6`. The pipeline
+requires six consecutive observed inside frames to alert and six consecutive
+observed outside frames before re-arming that track for a later intrusion.
+
+| Video | GT Intrusion | Stabilized Intrusion | Stabilized Loitering | Output |
+| ----- | -----------: | -------------------: | -------------------: | ------ |
+| A | 6 | 5 | 0 | `C:\VisionGuard\outputs\roi-confirmation-final-videoA.mp4` |
+| B | 10 | 10 | 1 | `C:\VisionGuard\outputs\roi-confirmation-final-videoB.mp4` |
+| C | 2 | 2 | 0 | `C:\VisionGuard\outputs\roi-confirmation-final-videoC.mp4` |
+
+Video B's predicted count dropped from 12 to 10 without changing the A or C
+counts. Count agreement alone does not prove event-level identity matching, so a
+timestamp/visual audit is still required before replacing the baseline FP/FN
+metrics above.
+
+## 10. Conclusion and Next Steps
 
 The Week 4 baseline integrates polygon intrusion and dwell-time loitering alongside
 line crossing, with visual output and manual evaluation on three videos.
 Intrusion achieved **89.47% precision, 94.44% recall, and 91.89% micro F1** on the
 reported annotations. The single reported loitering event was detected.
 
-Before treating the milestone as fully validated:
+Before treating the revised metrics as fully validated:
 
-- Confirm the full unit-test suite and cleanup edge cases.
-- Add event timestamps/track references for A's FN and B's two FP.
+- Add event timestamps/track references for A's FN and the stabilized B events.
 - Document the intended out-of-frame ROI policy for C.
 
-Next experiments should address stable ROI entry/exit transitions and add more
-positive loitering scenarios, including occlusion, re-entry, and threshold-boundary
-cases. The config-driven pipeline, JSONL events, and run metadata are ready for the
-FastAPI and persistence work planned for Week 6.
+Next experiments should add more positive loitering scenarios, including occlusion,
+re-entry, and threshold-boundary cases. The config-driven pipeline, JSONL events,
+and run metadata are ready for the FastAPI and persistence work planned for Week 6.

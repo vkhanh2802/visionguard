@@ -427,7 +427,7 @@ Implemented:
 
 - Polygon ROI and self-implemented ray-casting point-in-polygon geometry
 - Bottom-center based ROI membership checks
-- Intrusion events on observed outside-to-inside transitions
+- Intrusion events after a configurable consecutive-inside ROI confirmation
 - Loitering events based on video timestamps and a configurable dwell threshold
 - Independent per-track state and stale-state cleanup
 - Combined line crossing, intrusion, and loitering processing on every frame
@@ -438,6 +438,10 @@ Implemented:
 
 - Points on polygon edges or vertices are treated as inside the ROI.
 - A track's first observation does not produce an intrusion event, even if inside.
+- `entry_confirmation_frames` requires consecutive observed inside frames after an
+  outside state before an intrusion is emitted; the supplied runtime configs use `6`.
+- `exit_confirmation_frames` requires consecutive observed outside frames before a
+  confirmed track is re-armed for a later intrusion; runtime configs also use `6`.
 - Loitering starts at the first observed inside position and triggers once per visit.
 - An observed exit resets the loitering visit; a later re-entry can produce new events.
 - Short tracking gaps retain state within the configured frame-gap limit. Loitering
@@ -470,6 +474,14 @@ Observed failures:
 Full ROI coordinates, clip metadata, methodology, and follow-ups are documented in
 [docs/week4_evaluation.md](docs/week4_evaluation.md).
 
+### ROI Stabilization Rerun
+
+The 2026-09-18 rerun used six consecutive observed frames for both ROI entry and
+exit confirmation. Counts were A: `5` intrusion / `0` loitering, B: `10` / `1`,
+and C: `2` / `0`. B dropped from 12 to 10 intrusion alerts while A and C retained
+their baseline counts. Event-level visual matching is still required before
+replacing the baseline precision/recall metrics.
+
 ### Running the Week 4 Baseline
 
 Use the corresponding YAML configuration. ROI coordinates are in original-frame
@@ -496,11 +508,10 @@ loitering counts matched all three pre-refactor runs.
 | B | 12 | 12 | 1 | 1 | Matched |
 | C | 2 | 2 | 0 | 0 | Matched |
 
-### Remaining Validation and Improvements
+### Remaining Improvements
 
-- Confirm a full test-suite pass; no new pytest pass is claimed by this documentation update.
-- Check cleanup boundary cases, including continuous observations with
-  `max_missing_frames=0` and exact-limit tracking gaps.
+- Add timestamped physical-person annotations before reporting revised metrics.
+- Add more positive loitering examples with occlusion and re-entry.
 - Add stable inside/outside confirmation to reduce boundary-jitter duplicates,
   then re-evaluate all three clips for any loss in recall.
 - Add event timestamps and track references to the annotations, measure loitering

@@ -228,6 +228,8 @@ class VideoPipeline:
                 polygon=tuple(zone.polygon),
                 zone_id=intrusion_config.zone_id,
                 max_missing_frames=self.config.tracking.max_missing_frames,
+                entry_confirmation_frames=intrusion_config.entry_confirmation_frames,
+                exit_confirmation_frames=intrusion_config.exit_confirmation_frames,
             )
 
         loitering_engine = None
