@@ -145,10 +145,8 @@ SQLite records the final failed lifecycle state and error message.
 ## API Boundary
 
 FastAPI uses `AnalysisService`, not `scripts/run_video.py`. `POST /analyze` creates a
-persisted `running` job, then starts `VideoPipeline` in a FastAPI background task.
-Clients poll `GET /runs/{run_id}` and can query events, analytics, or download the
-annotated video after completion.
-
-At API startup, any run left `running` by an interrupted process is marked `failed`.
-This prevents stale status in the current single-process deployment model. See the
-[API guide](api.md) for endpoint behavior and operational constraints.
+persisted `queued` run and enqueues a serializable job in Redis. The separate RQ worker
+transitions the run to `running`, executes `VideoPipeline`, and persists completion or
+failure. Clients poll `GET /runs/{run_id}` and can query events, analytics, or download
+the annotated video after completion. See the [API guide](api.md) and
+[Redis service guide](redis.md) for operational commands.

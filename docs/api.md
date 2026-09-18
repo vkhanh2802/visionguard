@@ -14,19 +14,20 @@ Swagger UI is available at `http://127.0.0.1:8000/docs`.
 
 ```text
 POST /analyze
-  -> analysis_runs.status = running
-  -> FastAPI background task runs VideoPipeline
+  -> analysis_runs.status = queued
+  -> FastAPI enqueues a Redis job
+  -> RQ worker changes status to running and runs VideoPipeline
   -> emitted events are inserted into SQLite
   -> completed: metrics and counters are written
   -> failed: error_message is written
 ```
 
 `POST /analyze` returns before inference finishes. Use the returned `run_id` with
-`GET /runs/{run_id}` to observe `running`, `completed`, or `failed` status.
+`GET /runs/{run_id}` to observe `queued`, `running`, `completed`, or `failed` status.
 
-The current implementation uses FastAPI in-process background tasks. Run a single API
-worker. A server restart interrupts active analysis; API startup marks such runs
-`failed` with an explanatory error message.
+FastAPI and the RQ worker run as separate processes. Redis retains queued jobs across
+an API restart. Keep one RQ worker running for local operation; on Windows VisionGuard
+uses RQ `SimpleWorker` to avoid Unix-only fork APIs.
 
 ## Endpoints
 

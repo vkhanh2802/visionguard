@@ -15,17 +15,19 @@ class RunRecorder:
         output_path: Path,
         config_data: dict,
         event_writer: EventJsonlWriter | None = None,
+        create_run: bool = True,
     ):
         self.repository = repository
         self.run_id = run_id
         self.event_writer = event_writer
 
-        self.repository.create_run(
-            run_id=run_id,
-            source_path=source_path,
-            output_path=output_path,
-            config_data=config_data,
-        )
+        if create_run:
+            self.repository.create_run(
+                run_id=run_id,
+                source_path=source_path,
+                output_path=output_path,
+                config_data=config_data,
+            )
 
     def record_event(self, event: Event, frame_id: int) -> None:
         self.repository.record_event(

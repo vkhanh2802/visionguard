@@ -138,9 +138,9 @@ Open `http://127.0.0.1:8000/docs` for Swagger UI. The root endpoint at
 | `GET` | `/events` | List events, optionally filtered by `run_id` or `event_type`. |
 | `POST` | `/analyze` | Start an analysis job and return a `run_id`. |
 
-`POST /analyze` runs inference in a FastAPI background task. It returns `202 Accepted`
-with a `running` run ID; poll `GET /runs/{run_id}` until the run becomes `completed` or
-`failed`.
+`POST /analyze` persists a `queued` run and sends it to Redis. The separate RQ worker
+runs inference, changing the status to `running`, then `completed` or `failed`. Poll
+`GET /runs/{run_id}` to follow the lifecycle.
 
 ```json
 {
@@ -174,6 +174,26 @@ For safety, API analysis requests must stay inside `C:\VisionGuard\videos`,
 `C:\VisionGuard\outputs`, and `C:\VisionGuard\configs` by default. See
 [API guide](docs/api.md) for environment variables that change these local roots or
 dashboard CORS origins.
+
+## Redis Queue Service
+
+Redis is configured in `compose.yaml` for the RQ-based durable analysis worker.
+Open Docker Desktop and run:
+
+```bash
+docker compose up -d redis
+docker compose exec redis redis-cli ping
+```
+
+The expected response is `PONG`. Redis listens only on `127.0.0.1:6379` and keeps queue
+data in a Docker named volume. See [Redis service guide](docs/redis.md) for lifecycle
+commands and queue architecture.
+
+Start the RQ worker in another terminal before submitting dashboard analysis jobs:
+
+```powershell
+& "C:\Users\Khanh\miniconda3\envs\visionguard\python.exe" -m scripts.run_worker
+```
 
 ## CLI Overrides
 

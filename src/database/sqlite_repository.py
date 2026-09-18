@@ -22,57 +22,10 @@ class SQLiteRepository:
 
     def _initialize(self) -> None:
         with closing(self._connect()) as connection:
+            self._migrate_run_statuses(connection)
+
             with connection:
-                connection.executescript(
-                    """
-                    CREATE TABLE IF NOT EXISTS analysis_runs (
-                        run_id TEXT PRIMARY KEY,
-                        source_path TEXT NOT NULL,
-                        output_path TEXT NOT NULL,
-                        status TEXT NOT NULL
-                            CHECK (status IN ('running', 'completed', 'failed')),
-                        created_at TEXT NOT NULL,
-                        completed_at TEXT,
-                        error_message TEXT,
-                        config_json TEXT NOT NULL,
-                        processed_frames INTEGER,
-                        source_fps REAL,
-                        effective_fps REAL,
-                        core_processing_fps REAL,
-                        end_to_end_fps REAL,
-                        elapsed_seconds REAL,
-                        stopped_early INTEGER,
-                        in_count INTEGER,
-                        out_count INTEGER,
-                        intrusion_count INTEGER,
-                        loitering_count INTEGER
-                    );
-
-                    CREATE TABLE IF NOT EXISTS events (
-                        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_id TEXT NOT NULL,
-                        frame_id INTEGER NOT NULL,
-                        event_type TEXT NOT NULL,
-                        track_id INTEGER NOT NULL,
-                        video_timestamp REAL NOT NULL,
-                        position_x INTEGER NOT NULL,
-                        position_y INTEGER NOT NULL,
-                        direction TEXT,
-                        zone_id TEXT,
-                        duration_seconds REAL,
-                        logged_at TEXT NOT NULL,
-                        FOREIGN KEY (run_id)
-                            REFERENCES analysis_runs(run_id)
-                            ON DELETE CASCADE
-                    );
-
-                    CREATE INDEX IF NOT EXISTS idx_events_run_timestamp
-                    ON events(run_id, video_timestamp);
-
-                    CREATE INDEX IF NOT EXISTS idx_events_type
-                    ON events(event_type);
-                    """
-                )
+                self._create_tables(connection)
 
                 columns = {
                     row["name"]
@@ -83,13 +36,130 @@ class SQLiteRepository:
                         "ALTER TABLE analysis_runs ADD COLUMN error_message TEXT"
                     )
 
+    @staticmethod
+    def _create_tables(connection: sqlite3.Connection) -> None:
+        connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS analysis_runs (
+                run_id TEXT PRIMARY KEY,
+                source_path TEXT NOT NULL,
+                output_path TEXT NOT NULL,
+                status TEXT NOT NULL
+                    CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+                created_at TEXT NOT NULL,
+                completed_at TEXT,
+                error_message TEXT,
+                config_json TEXT NOT NULL,
+                processed_frames INTEGER,
+                source_fps REAL,
+                effective_fps REAL,
+                core_processing_fps REAL,
+                end_to_end_fps REAL,
+                elapsed_seconds REAL,
+                stopped_early INTEGER,
+                in_count INTEGER,
+                out_count INTEGER,
+                intrusion_count INTEGER,
+                loitering_count INTEGER
+            );
+
+            CREATE TABLE IF NOT EXISTS events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                frame_id INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                track_id INTEGER NOT NULL,
+                video_timestamp REAL NOT NULL,
+                position_x INTEGER NOT NULL,
+                position_y INTEGER NOT NULL,
+                direction TEXT,
+                zone_id TEXT,
+                duration_seconds REAL,
+                logged_at TEXT NOT NULL,
+                FOREIGN KEY (run_id)
+                    REFERENCES analysis_runs(run_id)
+                    ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_events_run_timestamp
+            ON events(run_id, video_timestamp);
+
+            CREATE INDEX IF NOT EXISTS idx_events_type
+            ON events(event_type);
+            """
+        )
+
+    def _migrate_run_statuses(self, connection: sqlite3.Connection) -> None:
+        schema_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'analysis_runs'"
+        ).fetchone()
+        if schema_row is None or "'queued'" in schema_row["sql"]:
+            return
+
+        legacy_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(analysis_runs)")
+        }
+        error_message = "error_message" if "error_message" in legacy_columns else "NULL"
+
+        connection.execute("PRAGMA foreign_keys = OFF")
+        try:
+            with connection:
+                connection.execute("DROP INDEX IF EXISTS idx_events_run_timestamp")
+                connection.execute("DROP INDEX IF EXISTS idx_events_type")
+                connection.execute("ALTER TABLE events RENAME TO events_legacy")
+                connection.execute(
+                    "ALTER TABLE analysis_runs RENAME TO analysis_runs_legacy"
+                )
+                self._create_tables(connection)
+                connection.execute(
+                    f"""
+                    INSERT INTO analysis_runs (
+                        run_id, source_path, output_path, status, created_at,
+                        completed_at, error_message, config_json, processed_frames,
+                        source_fps, effective_fps, core_processing_fps,
+                        end_to_end_fps, elapsed_seconds, stopped_early, in_count,
+                        out_count, intrusion_count, loitering_count
+                    )
+                    SELECT
+                        run_id, source_path, output_path, status, created_at,
+                        completed_at, {error_message}, config_json, processed_frames,
+                        source_fps, effective_fps, core_processing_fps,
+                        end_to_end_fps, elapsed_seconds, stopped_early, in_count,
+                        out_count, intrusion_count, loitering_count
+                    FROM analysis_runs_legacy
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO events (
+                        event_id, run_id, frame_id, event_type, track_id,
+                        video_timestamp, position_x, position_y, direction, zone_id,
+                        duration_seconds, logged_at
+                    )
+                    SELECT
+                        event_id, run_id, frame_id, event_type, track_id,
+                        video_timestamp, position_x, position_y, direction, zone_id,
+                        duration_seconds, logged_at
+                    FROM events_legacy
+                    """
+                )
+                connection.execute("DROP TABLE events_legacy")
+                connection.execute("DROP TABLE analysis_runs_legacy")
+        finally:
+            connection.execute("PRAGMA foreign_keys = ON")
+
     def create_run(
         self,
         run_id: str,
         source_path: str | Path,
         output_path: str | Path,
         config_data: dict,
+        status: str = "running",
     ) -> None:
+        if status not in {"queued", "running"}:
+            raise ValueError(f"Unsupported initial run status: {status}")
+
         with closing(self._connect()) as connection:
             with connection:
                 connection.execute(
@@ -101,12 +171,13 @@ class SQLiteRepository:
                         status,
                         created_at,
                         config_json
-                    ) VALUES (?, ?, ?, 'running', ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
                         str(source_path),
                         str(output_path),
+                        status,
                         self._utc_now(),
                         json.dumps(config_data, sort_keys=True, default=str),
                     ),
@@ -212,6 +283,32 @@ class SQLiteRepository:
                     WHERE run_id = ?
                     """,
                     (self._utc_now(), error_message, run_id),
+                )
+
+    def start_run(self, run_id: str) -> None:
+        with closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute(
+                    """
+                    UPDATE analysis_runs
+                    SET status = 'running'
+                    WHERE run_id = ? AND status = 'queued'
+                    """,
+                    (run_id,),
+                )
+
+                if cursor.rowcount == 1:
+                    return
+
+                run = connection.execute(
+                    "SELECT status FROM analysis_runs WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()
+                if run is None:
+                    raise KeyError(f"Unknown run_id: {run_id}")
+
+                raise RuntimeError(
+                    f"Cannot start run_id={run_id} with status={run['status']}"
                 )
 
                 if cursor.rowcount != 1:

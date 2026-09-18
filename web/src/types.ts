@@ -1,4 +1,4 @@
-export type RunStatus = "running" | "completed" | "failed";
+export type RunStatus = "queued" | "running" | "completed" | "failed";
 
 export interface HealthResponse {
   status: "ok";
@@ -79,5 +79,5 @@ export interface AnalysisRequest {
 
 export interface AnalysisAcceptedResponse {
   run_id: string;
-  status: "running";
+  status: "queued";
 }

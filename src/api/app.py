@@ -1,13 +1,15 @@
-import logging
-from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from redis import Redis
+from redis.exceptions import RedisError
+from rq import Queue
 
-from src.analysis_service import create_analysis_job, run_background_analysis
-from src.api.dependencies import get_repository, get_settings
+from src.analysis_jobs import execute_queued_analysis
+from src.api.dependencies import get_queue, get_repository, get_settings
 from src.api.settings import ApiSettings
 from src.api.schemas import (
     ApiIndexResponse,
@@ -28,31 +30,23 @@ from src.config import AppConfig, load_config
 def create_app(
     database_path: str | Path = "data/visionguard.db",
     settings: ApiSettings | None = None,
+    queue: Queue | None = None,
 ) -> FastAPI:
     repository = SQLiteRepository(database_path)
     settings = settings or ApiSettings.from_environment()
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        recovered_run_count = repository.fail_interrupted_runs(
-            "Analysis interrupted because the API process restarted."
-        )
-        if recovered_run_count:
-            logging.getLogger("visionguard").warning(
-                "Marked %s interrupted analysis run(s) as failed.",
-                recovered_run_count,
-            )
-
-        yield
+    queue = queue or Queue(
+        settings.queue_name,
+        connection=Redis.from_url(settings.redis_url),
+    )
 
     app = FastAPI(
         title="VisionGuard API",
         version="0.1.0",
         description="Video analytics runs and events API.",
-        lifespan=lifespan,
     )
     app.state.repository = repository
     app.state.settings = settings
+    app.state.queue = queue
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.allowed_origins),
@@ -201,9 +195,9 @@ def create_app(
     )
     def analyze(
         request: AnalyzeRequest,
-        background_tasks: BackgroundTasks,
         repository: SQLiteRepository = Depends(get_repository),
         settings: ApiSettings = Depends(get_settings),
+        queue: Queue = Depends(get_queue),
     ) -> AnalyzeAcceptedResponse:
         try:
             source_path, output_path, config_path = settings.validate_analysis_paths(
@@ -212,17 +206,38 @@ def create_app(
                 request.config_path,
             )
             config = _load_api_config(config_path)
-            job = create_analysis_job(
-                config=config,
-                source_path=source_path,
-                output_path=output_path,
-                repository=repository,
-            )
         except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
 
-        background_tasks.add_task(run_background_analysis, job)
-        return AnalyzeAcceptedResponse(run_id=job.run_id, status="running")
+        run_id = str(uuid4())
+        config_data = config.model_dump(mode="json")
+        repository.create_run(
+            run_id=run_id,
+            source_path=source_path,
+            output_path=output_path,
+            config_data=config_data,
+            status="queued",
+        )
+
+        try:
+            queue.enqueue(
+                execute_queued_analysis,
+                run_id,
+                config_data,
+                str(source_path),
+                str(output_path),
+                str(repository.database_path),
+                job_id=run_id,
+                job_timeout=7200,
+            )
+        except RedisError as error:
+            repository.fail_run(run_id, f"Failed to enqueue analysis: {error}")
+            raise HTTPException(
+                status_code=503,
+                detail="Analysis queue is unavailable.",
+            ) from error
+
+        return AnalyzeAcceptedResponse(run_id=run_id, status="queued")
 
     return app
 

@@ -1,6 +1,4 @@
-import importlib
 from pathlib import Path
-from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -160,20 +158,14 @@ def test_rejects_invalid_pagination(tmp_path: Path):
 def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
     database_path = tmp_path / "visionguard.db"
     captured = {}
-    api_module = importlib.import_module("src.api.app")
 
-    def fake_create_analysis_job(**kwargs):
-        captured["config"] = kwargs["config"]
-        captured["source_path"] = kwargs["source_path"]
-        captured["output_path"] = kwargs["output_path"]
-        return SimpleNamespace(run_id="run-analysis")
+    class RecordingQueue:
+        def enqueue(self, function, *args, **kwargs):
+            captured["function"] = function
+            captured["args"] = args
+            captured["kwargs"] = kwargs
 
-    def fake_run_background_analysis(job):
-        captured["background_run_id"] = job.run_id
-
-    monkeypatch.setattr(api_module, "create_analysis_job", fake_create_analysis_job)
-    monkeypatch.setattr(api_module, "run_background_analysis", fake_run_background_analysis)
-    client = TestClient(create_app(database_path))
+    client = TestClient(create_app(database_path, queue=RecordingQueue()))
 
     response = client.post(
         "/analyze",
@@ -184,13 +176,15 @@ def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
     )
 
     assert response.status_code == 202
-    assert response.json() == {"run_id": "run-analysis", "status": "running"}
-    assert captured["source_path"] == Path("C:/VisionGuard/videos/test.mp4").resolve()
-    assert captured["output_path"] == Path(
-        "C:/VisionGuard/outputs/api-output.mp4"
-    ).resolve()
-    assert not captured["config"].output.display
-    assert captured["background_run_id"] == "run-analysis"
+    body = response.json()
+    assert body["status"] == "queued"
+    assert captured["args"][0] == body["run_id"]
+    assert captured["args"][2] == str(Path("C:/VisionGuard/videos/test.mp4").resolve())
+    assert captured["args"][3] == str(
+        Path("C:/VisionGuard/outputs/api-output.mp4").resolve()
+    )
+    assert captured["kwargs"]["job_id"] == body["run_id"]
+    assert SQLiteRepository(database_path).get_run(body["run_id"])["status"] == "queued"
 
 
 def test_rejects_missing_analysis_config(tmp_path: Path):
@@ -263,7 +257,7 @@ def test_loads_api_settings_from_environment(monkeypatch):
     )
 
 
-def test_startup_marks_interrupted_runs_as_failed(tmp_path: Path):
+def test_api_start_does_not_fail_worker_run(tmp_path: Path):
     database_path = tmp_path / "visionguard.db"
     repository = SQLiteRepository(database_path)
     repository.create_run("running-1", "input.mp4", "output.mp4", {})
@@ -272,7 +266,4 @@ def test_startup_marks_interrupted_runs_as_failed(tmp_path: Path):
         response = client.get("/runs/running-1")
 
     assert response.status_code == 200
-    assert response.json()["status"] == "failed"
-    assert response.json()["error_message"] == (
-        "Analysis interrupted because the API process restarted."
-    )
+    assert response.json()["status"] == "running"

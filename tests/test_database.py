@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import sqlite3
 
 from src.database import SQLiteRepository
 from src.events import Event
@@ -45,6 +46,85 @@ def test_creates_and_completes_run(tmp_path: Path):
     assert run["processed_frames"] == 100
     assert run["intrusion_count"] == 3
     assert run["stopped_early"] == 0
+
+
+def test_starts_queued_run(tmp_path: Path):
+    repository = SQLiteRepository(tmp_path / "visionguard.db")
+    repository.create_run(
+        "run-1",
+        "input.mp4",
+        "output.mp4",
+        {},
+        status="queued",
+    )
+
+    repository.start_run("run-1")
+
+    assert repository.get_run("run-1")["status"] == "running"
+
+    with pytest.raises(RuntimeError, match="Cannot start"):
+        repository.start_run("run-1")
+
+
+def test_migrates_existing_database_to_support_queued_runs(tmp_path: Path):
+    database_path = tmp_path / "visionguard.db"
+    connection = sqlite3.connect(database_path)
+    connection.executescript(
+        """
+        CREATE TABLE analysis_runs (
+            run_id TEXT PRIMARY KEY,
+            source_path TEXT NOT NULL,
+            output_path TEXT NOT NULL,
+            status TEXT NOT NULL
+                CHECK (status IN ('running', 'completed', 'failed')),
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            error_message TEXT,
+            config_json TEXT NOT NULL,
+            processed_frames INTEGER,
+            source_fps REAL,
+            effective_fps REAL,
+            core_processing_fps REAL,
+            end_to_end_fps REAL,
+            elapsed_seconds REAL,
+            stopped_early INTEGER,
+            in_count INTEGER,
+            out_count INTEGER,
+            intrusion_count INTEGER,
+            loitering_count INTEGER
+        );
+        CREATE TABLE events (
+            event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            frame_id INTEGER NOT NULL,
+            event_type TEXT NOT NULL,
+            track_id INTEGER NOT NULL,
+            video_timestamp REAL NOT NULL,
+            position_x INTEGER NOT NULL,
+            position_y INTEGER NOT NULL,
+            direction TEXT,
+            zone_id TEXT,
+            duration_seconds REAL,
+            logged_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES analysis_runs(run_id) ON DELETE CASCADE
+        );
+        INSERT INTO analysis_runs (
+            run_id, source_path, output_path, status, created_at, config_json
+        ) VALUES ('legacy-run', 'input.mp4', 'output.mp4', 'completed', 'now', '{}');
+        INSERT INTO events (
+            run_id, frame_id, event_type, track_id, video_timestamp,
+            position_x, position_y, logged_at
+        ) VALUES ('legacy-run', 1, 'intrusion', 7, 1.0, 100, 200, 'now');
+        """
+    )
+    connection.close()
+
+    repository = SQLiteRepository(database_path)
+    repository.create_run("queued-run", "input.mp4", "output.mp4", {}, status="queued")
+
+    assert repository.get_run("legacy-run")["status"] == "completed"
+    assert repository.list_events("legacy-run")[0]["track_id"] == 7
+    assert repository.get_run("queued-run")["status"] == "queued"
 
 
 def test_records_and_filters_events(tmp_path: Path):

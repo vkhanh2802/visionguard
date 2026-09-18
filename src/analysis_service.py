@@ -28,8 +28,10 @@ def create_analysis_job(
     output_path: str | Path,
     repository: SQLiteRepository,
     logger: logging.Logger | None = None,
+    run_id: str | None = None,
+    create_run: bool = True,
 ) -> AnalysisJob:
-    run_id = str(uuid4())
+    run_id = run_id or str(uuid4())
     source = Path(source_path)
     output = Path(output_path)
     config_data = config.model_dump(mode="json")
@@ -41,6 +43,7 @@ def create_analysis_job(
         output_path=output,
         config_data=config_data,
         event_writer=event_writer,
+        create_run=create_run,
     )
 
     return AnalysisJob(

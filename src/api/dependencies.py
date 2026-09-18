@@ -1,4 +1,5 @@
 from fastapi import Request
+from rq import Queue
 
 from src.database import SQLiteRepository
 
@@ -11,3 +12,7 @@ def get_repository(request: Request) -> SQLiteRepository:
 
 def get_settings(request: Request) -> ApiSettings:
     return request.app.state.settings
+
+
+def get_queue(request: Request) -> Queue:
+    return request.app.state.queue

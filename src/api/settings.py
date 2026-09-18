@@ -12,6 +12,8 @@ class ApiSettings:
         "http://127.0.0.1:5173",
         "http://localhost:5173",
     )
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    queue_name: str = "visionguard"
 
     @classmethod
     def from_environment(cls) -> "ApiSettings":
@@ -34,6 +36,11 @@ class ApiSettings:
                 for origin in origins.split(",")
                 if origin.strip()
             ),
+            redis_url=os.environ.get(
+                "VISIONGUARD_REDIS_URL",
+                "redis://127.0.0.1:6379/0",
+            ),
+            queue_name=os.environ.get("VISIONGUARD_QUEUE_NAME", "visionguard"),
         )
 
     def validate_analysis_paths(

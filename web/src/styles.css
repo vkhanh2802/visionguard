@@ -130,6 +130,11 @@ h3 {
   box-shadow: 0 0 0 4px rgb(242 123 120 / 12%);
 }
 
+.status-dot.queued {
+  background: #8ca8ff;
+  box-shadow: 0 0 0 4px rgb(140 168 255 / 12%);
+}
+
 .status-dot.running {
   background: #e6b64a;
   box-shadow: 0 0 0 4px rgb(230 182 74 / 12%);
@@ -330,6 +335,11 @@ input:focus {
 .status-label.running {
   background: rgb(230 182 74 / 15%);
   color: #f0ca71;
+}
+
+.status-label.queued {
+  background: rgb(140 168 255 / 15%);
+  color: #adbeff;
 }
 
 .status-label.failed {

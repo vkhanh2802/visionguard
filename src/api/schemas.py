@@ -20,7 +20,7 @@ class RunResponse(BaseModel):
     run_id: str
     source_path: str
     output_path: str
-    status: Literal["running", "completed", "failed"]
+    status: Literal["queued", "running", "completed", "failed"]
     created_at: str
     completed_at: str | None
     error_message: str | None
@@ -72,7 +72,7 @@ class AnalyzeRequest(BaseModel):
 
 class AnalyzeAcceptedResponse(BaseModel):
     run_id: str
-    status: Literal["running"]
+    status: Literal["queued"]
 
 
 class EventAnalyticsResponse(BaseModel):
@@ -85,7 +85,7 @@ class EventAnalyticsResponse(BaseModel):
 
 class RunAnalyticsResponse(BaseModel):
     run_id: str
-    status: Literal["running", "completed", "failed"]
+    status: Literal["queued", "running", "completed", "failed"]
     processed_frames: int | None
     in_count: int | None
     out_count: int | None

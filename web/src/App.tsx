@@ -106,7 +106,7 @@ export function App() {
   }, [selectedRunId]);
 
   useEffect(() => {
-    if (!selectedRun || selectedRun.status !== "running") {
+    if (!selectedRun || !["queued", "running"].includes(selectedRun.status)) {
       return;
     }
 
