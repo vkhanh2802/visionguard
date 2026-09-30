@@ -93,3 +93,63 @@ class RunAnalyticsResponse(BaseModel):
     intrusion_count: int | None
     loitering_count: int | None
     events: EventAnalyticsResponse
+    tracking: "TrackingDiagnosticsResponse | None"
+
+
+class TrackLifetimeResponse(BaseModel):
+    track_id: int
+    first_seen_frame: int
+    last_seen_frame: int
+    observed_frames: int
+    lifetime_frames: int
+    total_missing_frames: int
+    longest_gap_frames: int
+    first_seen_in_roi: bool
+
+
+class TrackingDiagnosticsResponse(BaseModel):
+    total_track_count: int
+    new_track_count_in_roi: int
+    tracks_with_gaps: int
+    total_missing_frames: int
+    max_gap_frames: int
+    median_observed_frames: float | None
+    track_lifetimes: list[TrackLifetimeResponse]
+    continuity: "ContinuityDiagnosticsResponse | None" = None
+    deduplication: "DeduplicationDiagnosticsResponse | None" = None
+
+
+class ContinuityDiagnosticsResponse(BaseModel):
+    replacement_match_count: int
+    pending_match_count: int
+    rejected_ambiguous_match_count: int
+    rejected_gap_match_count: int
+    replacement_matches: list["ReplacementMatchResponse"] = Field(default_factory=list)
+
+
+class ReplacementMatchResponse(BaseModel):
+    canonical_track_id: int
+    replacement_track_id: int
+    frame_id: int
+    gap_frames: int
+    distance_px: float
+
+
+class DeduplicationDiagnosticsResponse(BaseModel):
+    confirmed_pair_count: int
+    pending_duplicate_observation_count: int
+    suppressed_observation_count: int
+    ambiguous_pair_count: int
+    handoff_count: int
+    confirmed_pairs: list["ConfirmedDuplicatePairResponse"] = Field(
+        default_factory=list
+    )
+
+
+class ConfirmedDuplicatePairResponse(BaseModel):
+    primary_track_id: int
+    duplicate_track_id: int
+    confirmed_frame_id: int
+    containment_ratio: float
+    iou: float
+    bottom_distance_px: float

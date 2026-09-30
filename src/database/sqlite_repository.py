@@ -35,6 +35,11 @@ class SQLiteRepository:
                     connection.execute(
                         "ALTER TABLE analysis_runs ADD COLUMN error_message TEXT"
                     )
+                if "tracking_diagnostics_json" not in columns:
+                    connection.execute(
+                        "ALTER TABLE analysis_runs "
+                        "ADD COLUMN tracking_diagnostics_json TEXT"
+                    )
 
     @staticmethod
     def _create_tables(connection: sqlite3.Connection) -> None:
@@ -60,7 +65,8 @@ class SQLiteRepository:
                 in_count INTEGER,
                 out_count INTEGER,
                 intrusion_count INTEGER,
-                loitering_count INTEGER
+                loitering_count INTEGER,
+                tracking_diagnostics_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -248,7 +254,8 @@ class SQLiteRepository:
                         in_count = ?,
                         out_count = ?,
                         intrusion_count = ?,
-                        loitering_count = ?
+                        loitering_count = ?,
+                        tracking_diagnostics_json = ?
                     WHERE run_id = ?
                     """,
                     (
@@ -264,6 +271,7 @@ class SQLiteRepository:
                         result.out_count,
                         result.intrusion_count,
                         result.loitering_count,
+                        json.dumps(result.tracking_diagnostics, sort_keys=True),
                         run_id,
                     ),
                 )
@@ -387,6 +395,7 @@ class SQLiteRepository:
                     analysis_runs.out_count,
                     analysis_runs.intrusion_count,
                     analysis_runs.loitering_count,
+                    analysis_runs.tracking_diagnostics_json,
                     COUNT(events.event_id) AS recorded_event_count,
                     COUNT(DISTINCT events.track_id) AS unique_track_count,
                     MIN(events.video_timestamp) AS first_event_timestamp,
@@ -418,6 +427,10 @@ class SQLiteRepository:
             row["event_type"]: row["event_count"]
             for row in event_rows
         }
+        diagnostics_json = result.pop("tracking_diagnostics_json")
+        result["tracking_diagnostics"] = (
+            json.loads(diagnostics_json) if diagnostics_json is not None else None
+        )
         return result
 
     def fail_interrupted_runs(self, error_message: str) -> int:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 @dataclass(frozen=True)
@@ -16,4 +16,5 @@ class PipelineResult:
     out_count: int
     intrusion_count: int
     loitering_count: int
+    tracking_diagnostics: dict[str, object] = field(default_factory=dict)
 

@@ -67,6 +67,7 @@ class EventJsonlWriter:
                 "intrusion": result.intrusion_count,
                 "loitering": result.loitering_count,
             },
+            "tracking_diagnostics": result.tracking_diagnostics,
             "config": config_data,
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }

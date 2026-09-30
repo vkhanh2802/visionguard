@@ -34,6 +34,10 @@ function formatSeconds(value: number | null): string {
   return value === null ? "-" : `${value.toFixed(1)} s`;
 }
 
+function formatDecimal(value: number | null): string {
+  return value === null ? "-" : value.toFixed(1);
+}
+
 function shortRunId(runId: string): string {
   return runId.slice(0, 8);
 }
@@ -320,6 +324,140 @@ export function App() {
                   </dl>
                 </section>
               </div>
+
+              <section className="tracking-panel">
+                <div className="section-heading">
+                  <div>
+                    <p className="eyebrow">TRACKING DIAGNOSTICS</p>
+                    <h3>ID continuity and detection gaps</h3>
+                  </div>
+                </div>
+                {!analytics && <p className="muted">Loading tracking diagnostics...</p>}
+                {analytics && !analytics.tracking && (
+                  <p className="muted">Tracking diagnostics are available for newly completed runs.</p>
+                )}
+                {analytics?.tracking && (
+                  <>
+                    <div className="diagnostic-grid">
+                      <Metric label="Total IDs" value={formatNumber(analytics.tracking.total_track_count)} />
+                      <Metric label="New IDs in ROI" value={formatNumber(analytics.tracking.new_track_count_in_roi)} />
+                      <Metric label="Tracks with gaps" value={formatNumber(analytics.tracking.tracks_with_gaps)} />
+                      <Metric label="Longest gap" value={`${analytics.tracking.max_gap_frames} frames`} />
+                      <Metric label="Missing frames" value={formatNumber(analytics.tracking.total_missing_frames)} />
+                      <Metric label="Median observed" value={formatDecimal(analytics.tracking.median_observed_frames)} />
+                    </div>
+                    <div className="event-table-wrap">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Track</th>
+                            <th>Observed</th>
+                            <th>Lifetime</th>
+                            <th>Missing</th>
+                            <th>Longest gap</th>
+                            <th>Born in ROI</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...analytics.tracking.track_lifetimes]
+                            .sort((left, right) => right.longest_gap_frames - left.longest_gap_frames || right.total_missing_frames - left.total_missing_frames)
+                            .slice(0, 10)
+                            .map((track) => (
+                              <tr key={track.track_id}>
+                                <td>#{track.track_id}</td>
+                                <td>{track.observed_frames}</td>
+                                <td>{track.lifetime_frames}</td>
+                                <td>{track.total_missing_frames}</td>
+                                <td>{track.longest_gap_frames}</td>
+                                <td>{track.first_seen_in_roi ? "Yes" : "No"}</td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {analytics.tracking.continuity && (
+                      <div className="continuity-summary">
+                        <p className="eyebrow">CONTINUITY DECISIONS</p>
+                        <div className="diagnostic-grid continuity-grid">
+                          <Metric label="Reassociated" value={formatNumber(analytics.tracking.continuity.replacement_match_count)} />
+                          <Metric label="Pending" value={formatNumber(analytics.tracking.continuity.pending_match_count)} />
+                          <Metric label="Ambiguous rejected" value={formatNumber(analytics.tracking.continuity.rejected_ambiguous_match_count)} />
+                          <Metric label="Gap rejected" value={formatNumber(analytics.tracking.continuity.rejected_gap_match_count)} />
+                        </div>
+                        <div className="event-table-wrap">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Frame</th>
+                                <th>Canonical</th>
+                                <th>Replacement</th>
+                                <th>Gap</th>
+                                <th>Distance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {analytics.tracking.continuity.replacement_matches.slice(-10).map((match) => (
+                                <tr key={`${match.frame_id}-${match.replacement_track_id}`}>
+                                  <td>{match.frame_id}</td>
+                                  <td>#{match.canonical_track_id}</td>
+                                  <td>#{match.replacement_track_id}</td>
+                                  <td>{match.gap_frames}</td>
+                                  <td>{match.distance_px.toFixed(1)} px</td>
+                                </tr>
+                              ))}
+                              {analytics.tracking.continuity.replacement_matches.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="empty-cell">No replacement IDs reassociated.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {analytics.tracking.deduplication && (
+                      <div className="continuity-summary">
+                        <p className="eyebrow">DUPLICATE SUPPRESSION</p>
+                        <div className="diagnostic-grid continuity-grid">
+                          <Metric label="Confirmed pairs" value={formatNumber(analytics.tracking.deduplication.confirmed_pair_count)} />
+                          <Metric label="Suppressed boxes" value={formatNumber(analytics.tracking.deduplication.suppressed_observation_count)} />
+                          <Metric label="Pending boxes" value={formatNumber(analytics.tracking.deduplication.pending_duplicate_observation_count)} />
+                          <Metric label="Ambiguous pairs" value={formatNumber(analytics.tracking.deduplication.ambiguous_pair_count)} />
+                        </div>
+                        <div className="event-table-wrap">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Confirmed frame</th>
+                                <th>Primary</th>
+                                <th>Duplicate</th>
+                                <th>Containment</th>
+                                <th>IoU</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {analytics.tracking.deduplication.confirmed_pairs.slice(-10).map((pair) => (
+                                <tr key={`${pair.confirmed_frame_id}-${pair.duplicate_track_id}`}>
+                                  <td>{pair.confirmed_frame_id}</td>
+                                  <td>#{pair.primary_track_id}</td>
+                                  <td>#{pair.duplicate_track_id}</td>
+                                  <td>{(pair.containment_ratio * 100).toFixed(0)}%</td>
+                                  <td>{pair.iou.toFixed(2)}</td>
+                                </tr>
+                              ))}
+                              {analytics.tracking.deduplication.confirmed_pairs.length === 0 && (
+                                <tr>
+                                  <td colSpan={5} className="empty-cell">No active duplicate pairs confirmed.</td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
             </>
           )}
         </section>

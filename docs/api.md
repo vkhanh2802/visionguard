@@ -103,7 +103,9 @@ optional. All API read endpoints use SQLite and do not read JSONL artifacts.
 GET /runs/{run_id}/analytics
 ```
 
-The response combines final counters from `analysis_runs` with aggregate event data:
+The response combines final counters from `analysis_runs`, aggregate event data, and
+tracking diagnostics collected from detections in every processed frame. Existing
+runs completed before diagnostics were added return `"tracking": null`.
 
 ```json
 {
@@ -124,9 +126,48 @@ The response combines final counters from `analysis_runs` with aggregate event d
       "intrusion": 3,
       "line_crossing": 2
     }
+  },
+  "tracking": {
+    "total_track_count": 12,
+    "new_track_count_in_roi": 3,
+    "tracks_with_gaps": 4,
+    "total_missing_frames": 17,
+    "max_gap_frames": 6,
+    "median_observed_frames": 42.5,
+    "track_lifetimes": [],
+    "continuity": {
+      "replacement_match_count": 2,
+      "pending_match_count": 3,
+      "rejected_ambiguous_match_count": 1,
+      "rejected_gap_match_count": 4
+    },
+    "deduplication": {
+      "confirmed_pair_count": 2,
+      "pending_duplicate_observation_count": 4,
+      "suppressed_observation_count": 17,
+      "ambiguous_pair_count": 0,
+      "handoff_count": 0,
+      "confirmed_pairs": []
+    }
   }
 }
 ```
+
+The optional `tracking.continuity` section reports replacement-ID decisions. A match is
+only promoted after consecutive compatible observations; ambiguous nearby-person and
+overlong-gap candidates are left as new tracks instead of being merged. When two boxes
+remain visible at the same time, continuity deliberately does not merge them; that case
+belongs to duplicate-detection/event suppression rather than lost-track reassociation.
+
+The optional `tracking.deduplication` section reports overlapping active-track decisions.
+Pending duplicate candidates are quarantined from event processing during confirmation;
+raw tracking metrics and annotated boxes remain unchanged. State retention controls
+confirmation across short gaps independently from handoff, which can be disabled when a
+duplicate must never inherit the primary event ID after the primary disappears. Week 6
+allows a 5-frame handoff for confirmed pairs to preserve one visit across a short primary
+track gap. The camera-specific loitering configuration also keeps a visit eligible for
+reassociation for up to 750 frames within a 60-pixel position gate, preventing a long
+chain of IDs for one person from generating repeated loitering events.
 
 ## Download Output
 
@@ -157,7 +198,9 @@ analysis_runs: lifecycle, config, paths, metrics, counters, errors
 ```
 
 JSONL event and metadata files are optional exports. Configure both logging paths to
-enable them; they share the SQLite `run_id` but are not read by the API.
+enable them; they share the SQLite `run_id` but are not read by the API. For API and
+dashboard submissions, the API inserts the `run_id` before each filename extension, so
+reruns never overwrite a prior run's artifacts.
 
 ## Browser Access
 

@@ -1,6 +1,13 @@
+from .continuity import TrackContinuityManager
+from .deduplication import ActiveTrackDeduplicator
 from .types import Track
 
-__all__ = ["Track", "YOLOByteTracker"]
+__all__ = [
+    "ActiveTrackDeduplicator",
+    "Track",
+    "TrackContinuityManager",
+    "YOLOByteTracker",
+]
 
 
 def __getattr__(name: str):

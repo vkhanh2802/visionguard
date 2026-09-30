@@ -94,6 +94,7 @@ def test_writes_run_metadata(tmp_path):
         out_count=1,
         intrusion_count=3,
         loitering_count=1,
+        tracking_diagnostics={"total_track_count": 4},
     )
 
     try:
@@ -114,3 +115,4 @@ def test_writes_run_metadata(tmp_path):
     assert metadata["end_to_end_fps"] == 20.0
     assert not metadata["stopped_early"]
     assert metadata["counts"]["intrusion"] == 3
+    assert metadata["tracking_diagnostics"] == {"total_track_count": 4}

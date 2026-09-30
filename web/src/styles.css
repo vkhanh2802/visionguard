@@ -424,9 +424,29 @@ input:focus {
 }
 
 .timeline-panel,
-.breakdown-panel {
+.breakdown-panel,
+.tracking-panel {
   border-top: 1px solid #294152;
   padding-top: 18px;
+}
+
+.tracking-panel {
+  margin-top: 22px;
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.continuity-summary {
+  margin-top: 22px;
+}
+
+.continuity-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .event-table-wrap {
@@ -553,7 +573,8 @@ td {
   }
 
   .analysis-form,
-  .metric-grid {
+  .metric-grid,
+  .diagnostic-grid {
     grid-template-columns: 1fr;
   }
 

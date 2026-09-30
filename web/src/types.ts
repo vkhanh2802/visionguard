@@ -69,6 +69,62 @@ export interface RunAnalytics {
     last_event_timestamp: number | null;
     by_type: Record<string, number>;
   };
+  tracking: {
+    total_track_count: number;
+    new_track_count_in_roi: number;
+    tracks_with_gaps: number;
+    total_missing_frames: number;
+    max_gap_frames: number;
+    median_observed_frames: number | null;
+    track_lifetimes: TrackLifetime[];
+    continuity: ContinuityDiagnostics | null;
+    deduplication: DeduplicationDiagnostics | null;
+  } | null;
+}
+
+export interface TrackLifetime {
+  track_id: number;
+  first_seen_frame: number;
+  last_seen_frame: number;
+  observed_frames: number;
+  lifetime_frames: number;
+  total_missing_frames: number;
+  longest_gap_frames: number;
+  first_seen_in_roi: boolean;
+}
+
+export interface ContinuityDiagnostics {
+  replacement_match_count: number;
+  pending_match_count: number;
+  rejected_ambiguous_match_count: number;
+  rejected_gap_match_count: number;
+  replacement_matches: ReplacementMatch[];
+}
+
+export interface ReplacementMatch {
+  canonical_track_id: number;
+  replacement_track_id: number;
+  frame_id: number;
+  gap_frames: number;
+  distance_px: number;
+}
+
+export interface DeduplicationDiagnostics {
+  confirmed_pair_count: number;
+  pending_duplicate_observation_count: number;
+  suppressed_observation_count: number;
+  ambiguous_pair_count: number;
+  handoff_count: number;
+  confirmed_pairs: ConfirmedDuplicatePair[];
+}
+
+export interface ConfirmedDuplicatePair {
+  primary_track_id: number;
+  duplicate_track_id: number;
+  confirmed_frame_id: number;
+  containment_ratio: number;
+  iou: number;
+  bottom_distance_px: number;
 }
 
 export interface AnalysisRequest {

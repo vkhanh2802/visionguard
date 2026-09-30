@@ -24,6 +24,15 @@ def make_result() -> PipelineResult:
         out_count=1,
         intrusion_count=3,
         loitering_count=1,
+        tracking_diagnostics={
+            "total_track_count": 2,
+            "new_track_count_in_roi": 1,
+            "tracks_with_gaps": 1,
+            "total_missing_frames": 3,
+            "max_gap_frames": 2,
+            "median_observed_frames": 10.0,
+            "track_lifetimes": [],
+        },
     )
 
 
@@ -46,6 +55,7 @@ def test_creates_and_completes_run(tmp_path: Path):
     assert run["processed_frames"] == 100
     assert run["intrusion_count"] == 3
     assert run["stopped_early"] == 0
+    assert run["tracking_diagnostics_json"] is not None
 
 
 def test_starts_queued_run(tmp_path: Path):
@@ -236,6 +246,7 @@ def test_gets_run_analytics(tmp_path: Path):
         "intrusion": 1,
         "line_crossing": 1,
     }
+    assert analytics["tracking_diagnostics"]["max_gap_frames"] == 2
 
 
 def test_marks_interrupted_runs_as_failed(tmp_path: Path):

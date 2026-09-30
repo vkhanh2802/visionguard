@@ -57,6 +57,24 @@ def create_analysis_job(
     )
 
 
+def scope_artifact_paths_for_run(config: AppConfig, run_id: str) -> AppConfig:
+    """Give optional JSON artifacts distinct filenames for a queued API run."""
+    if config.logging.event_jsonl_path is None:
+        return config
+
+    config_data = config.model_dump(mode="python")
+    logging_config = config_data["logging"]
+    logging_config["event_jsonl_path"] = _append_run_id(
+        config.logging.event_jsonl_path,
+        run_id,
+    )
+    logging_config["run_metadata_path"] = _append_run_id(
+        config.logging.run_metadata_path,
+        run_id,
+    )
+    return AppConfig.model_validate(config_data)
+
+
 def execute_analysis_job(job: AnalysisJob) -> PipelineResult:
     try:
         pipeline = VideoPipeline(
@@ -100,6 +118,10 @@ def _create_event_writer(
         metadata_path=config.logging.run_metadata_path,
         run_id=run_id,
     )
+
+
+def _append_run_id(path: Path, run_id: str) -> Path:
+    return path.with_name(f"{path.stem}.{run_id}{path.suffix}")
 
 
 def _record_event(

@@ -20,6 +20,22 @@ class TrackingConfig(BaseModel):
 
     history_length: int = Field(default=30, ge=1)
     max_missing_frames: int = Field(default=30, ge = 0)
+    tracker_config: Path | None = None
+    continuity_enabled: bool = False
+    continuity_max_gap_frames: int = Field(default=5, ge=0)
+    continuity_min_gap_frames: int = Field(default=2, ge=1)
+    continuity_max_distance_px: float = Field(default=60.0, gt=0.0)
+    continuity_confirmation_frames: int = Field(default=2, ge=1)
+    continuity_ambiguity_margin_px: float = Field(default=15.0, ge=0.0)
+    continuity_max_size_ratio: float = Field(default=2.0, ge=1.0)
+    duplicate_suppression_enabled: bool = False
+    duplicate_confirmation_frames: int = Field(default=3, ge=1)
+    duplicate_min_containment_ratio: float = Field(default=0.85, gt=0.0, le=1.0)
+    duplicate_max_bottom_distance_px: float = Field(default=35.0, gt=0.0)
+    duplicate_max_area_ratio: float = Field(default=3.0, ge=1.0)
+    duplicate_max_motion_difference_px: float = Field(default=12.0, ge=0.0)
+    duplicate_state_retention_frames: int = Field(default=5, ge=0)
+    duplicate_max_handoff_gap_frames: int = Field(default=5, ge=0)
 
 
 class LineCrossingConfig(BaseModel):
@@ -91,6 +107,21 @@ class LoiteringConfig(BaseModel):
     enabled: bool = True
     zone_id: str
     dwell_threshold_seconds: float = Field(gt=0.0)
+    id_reassociation_frames: int = Field(default=0, ge=0)
+    id_reassociation_distance_px: float = Field(default=0.0, ge=0.0)
+
+    @model_validator(mode="after")
+    def validate_id_reassociation(self):
+        has_frame_window = self.id_reassociation_frames > 0
+        has_distance_limit = self.id_reassociation_distance_px > 0
+
+        if has_frame_window != has_distance_limit:
+            raise ValueError(
+                "id_reassociation_frames and id_reassociation_distance_px "
+                "must be configured together."
+            )
+
+        return self
 
 class EventsConfig(BaseModel):
     model_config = ConfigDict(extra = "forbid")
@@ -121,6 +152,11 @@ class OutputConfig(BaseModel):
 
     display: bool = True
     codec: str = "mp4v"
+    encoder: Literal["opencv", "ffmpeg_nvenc"] = "opencv"
+    async_writer: bool = False
+    writer_queue_size: int = Field(default=4, ge=1)
+    ffmpeg_path: str = "ffmpeg"
+    nvenc_quality: int = Field(default=23, ge=0, le=51)
 
 class LoggingConfig(BaseModel):
     model_config = ConfigDict(extra= "forbid")

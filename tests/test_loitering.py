@@ -104,3 +104,60 @@ def test_long_tracking_gap_resets_timer():
     events = engine.process([make_track(1, (50, 50))], 5, 10.0)
 
     assert events == []
+
+
+def test_reassociates_nearby_replacement_track_after_loitering_alert():
+    engine = LoiteringEngine(
+        ROI,
+        dwell_threshold_seconds=1.0,
+        id_reassociation_frames=3,
+        id_reassociation_distance_px=10.0,
+    )
+
+    engine.process([make_track(1, (50, 50))], 1, 0.0)
+    events = engine.process([make_track(1, (50, 50))], 2, 1.0)
+    replacement_events = engine.process([make_track(2, (55, 50))], 3, 1.1)
+
+    assert len(events) == 1
+    assert replacement_events == []
+    assert 1 not in engine.visits
+    assert engine.visits[2].event_triggered is True
+
+
+def test_reassociation_window_can_exceed_missing_frame_window():
+    engine = LoiteringEngine(
+        ROI,
+        dwell_threshold_seconds=1.0,
+        max_missing_frames=2,
+        id_reassociation_frames=5,
+        id_reassociation_distance_px=10.0,
+    )
+
+    engine.process([make_track(1, (50, 50))], 1, 0.0)
+    assert len(engine.process([make_track(1, (50, 50))], 2, 1.0)) == 1
+    engine.process([], 3, 2.0)
+    engine.process([], 4, 3.0)
+    engine.process([], 5, 4.0)
+
+    replacement_events = engine.process([make_track(2, (55, 50))], 6, 5.0)
+
+    assert replacement_events == []
+    assert 1 not in engine.visits
+    assert engine.visits[2].event_triggered is True
+
+
+def test_does_not_reassociate_distant_replacement_track():
+    engine = LoiteringEngine(
+        ROI,
+        dwell_threshold_seconds=1.0,
+        id_reassociation_frames=3,
+        id_reassociation_distance_px=10.0,
+    )
+
+    engine.process([make_track(1, (50, 50))], 1, 0.0)
+    engine.process([make_track(1, (50, 50))], 2, 1.0)
+    engine.process([make_track(2, (80, 50))], 3, 1.1)
+    events = engine.process([make_track(2, (80, 50))], 4, 2.1)
+
+    assert len(events) == 1
+    assert engine.loitering_count == 2

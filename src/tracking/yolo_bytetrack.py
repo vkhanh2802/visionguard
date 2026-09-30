@@ -1,13 +1,22 @@
+from pathlib import Path
+
 import numpy as np
 from ultralytics import YOLO
 
 from .types import Track
 
 class YOLOByteTracker:
-    def __init__(self, model_path="yolo26n.pt", confidence=0.4, target_classes=None):
+    def __init__(
+        self,
+        model_path="yolo26n.pt",
+        confidence=0.4,
+        target_classes=None,
+        tracker_config: Path | None = None,
+    ):
         self.model = YOLO(model_path)
         self.confidence = confidence
         self.target_classes = set(target_classes) if target_classes else None
+        self.tracker_config = str(tracker_config or "bytetrack.yaml")
         self.target_class_ids = self._resolve_target_class_ids()
 
     def _resolve_target_class_ids(self) -> list[int] | None:
@@ -33,7 +42,7 @@ class YOLOByteTracker:
         result = self.model.track(
             frame,
             persist=True,
-            tracker="bytetrack.yaml",
+            tracker=self.tracker_config,
             conf=self.confidence,
             classes=self.target_class_ids,
             verbose=False,
@@ -66,3 +75,12 @@ class YOLOByteTracker:
                 )
             )
         return tracks
+
+    def reset(self) -> None:
+        predictor = getattr(self.model, "predictor", None)
+        trackers = getattr(predictor, "trackers", None)
+        if not trackers:
+            return
+        for tracker in trackers:
+            tracker.reset()
+        predictor.vid_path = [None] * len(trackers)

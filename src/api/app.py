@@ -9,6 +9,7 @@ from redis.exceptions import RedisError
 from rq import Queue
 
 from src.analysis_jobs import execute_queued_analysis
+from src.analysis_service import scope_artifact_paths_for_run
 from src.api.dependencies import get_queue, get_repository, get_settings
 from src.api.settings import ApiSettings
 from src.api.schemas import (
@@ -22,6 +23,7 @@ from src.api.schemas import (
     RunAnalyticsResponse,
     RunListResponse,
     RunResponse,
+    TrackingDiagnosticsResponse,
 )
 from src.database import SQLiteRepository
 from src.config import AppConfig, load_config
@@ -166,6 +168,13 @@ def create_app(
                 last_event_timestamp=analytics["last_event_timestamp"],
                 by_type=analytics["event_counts"],
             ),
+            tracking=(
+                TrackingDiagnosticsResponse.model_validate(
+                    analytics["tracking_diagnostics"]
+                )
+                if analytics["tracking_diagnostics"] is not None
+                else None
+            ),
         )
 
     @app.get("/events", response_model=EventListResponse)
@@ -210,6 +219,7 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
 
         run_id = str(uuid4())
+        config = scope_artifact_paths_for_run(config, run_id)
         config_data = config.model_dump(mode="json")
         repository.create_run(
             run_id=run_id,

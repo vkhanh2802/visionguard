@@ -130,12 +130,51 @@ def test_gets_run_analytics(tmp_path: Path):
     assert response.json()["events"]["recorded_event_count"] == 1
     assert response.json()["events"]["unique_track_count"] == 1
     assert response.json()["events"]["by_type"] == {"intrusion": 1}
+    assert response.json()["tracking"] is None
 
 
 def test_returns_404_for_missing_run_analytics(tmp_path: Path):
     response = create_client(tmp_path).get("/runs/missing/analytics")
 
     assert response.status_code == 404
+
+
+def test_returns_persisted_tracking_diagnostics(tmp_path: Path):
+    database_path = tmp_path / "visionguard.db"
+    repository = SQLiteRepository(database_path)
+    repository.create_run("run-1", "input.mp4", "output.mp4", {})
+    repository.complete_run(
+        "run-1",
+        PipelineResult(
+            source_path=Path("input.mp4"),
+            output_path=Path("output.mp4"),
+            processed_frames=100,
+            source_fps=30.0,
+            effective_fps=30.0,
+            core_processing_fps=25.0,
+            end_to_end_fps=20.0,
+            elapsed_seconds=5.0,
+            stopped_early=False,
+            in_count=0,
+            out_count=0,
+            intrusion_count=0,
+            loitering_count=0,
+            tracking_diagnostics={
+                "total_track_count": 2,
+                "new_track_count_in_roi": 1,
+                "tracks_with_gaps": 1,
+                "total_missing_frames": 3,
+                "max_gap_frames": 2,
+                "median_observed_frames": 10.0,
+                "track_lifetimes": [],
+            },
+        ),
+    )
+
+    response = TestClient(create_app(database_path)).get("/runs/run-1/analytics")
+
+    assert response.status_code == 200
+    assert response.json()["tracking"]["new_track_count_in_roi"] == 1
 
 
 def test_filters_events(tmp_path: Path):
@@ -185,6 +224,78 @@ def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
     )
     assert captured["kwargs"]["job_id"] == body["run_id"]
     assert SQLiteRepository(database_path).get_run(body["run_id"])["status"] == "queued"
+
+
+def test_scopes_analysis_artifacts_to_run_id(tmp_path: Path):
+    source_root = tmp_path / "videos"
+    output_root = tmp_path / "outputs"
+    config_root = tmp_path / "configs"
+    source_root.mkdir()
+    output_root.mkdir()
+    config_root.mkdir()
+    (source_root / "test.mp4").write_bytes(b"")
+    config_path = config_root / "config.yaml"
+    config_path.write_text(
+        """\
+detection:
+  model_path: yolo26n.pt
+  confidence: 0.4
+  target_classes: [person]
+tracking:
+  history_length: 30
+  max_missing_frames: 30
+events:
+  line_crossing:
+    enabled: true
+    start: [50, 300]
+    end: [600, 300]
+  zones:
+    restricted-zone-1:
+      polygon: [[100, 100], [200, 100], [200, 200], [100, 200]]
+  intrusion:
+    enabled: true
+    zone_id: restricted-zone-1
+  loitering:
+    enabled: true
+    zone_id: restricted-zone-1
+    dwell_threshold_seconds: 5.0
+output:
+  display: false
+  codec: mp4v
+logging:
+  level: INFO
+  event_jsonl_path: PLACEHOLDER/events.jsonl
+  run_metadata_path: PLACEHOLDER/metadata.json
+""".replace("PLACEHOLDER", output_root.as_posix()),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class RecordingQueue:
+        def enqueue(self, function, *args, **kwargs):
+            captured["args"] = args
+
+    settings = ApiSettings(
+        source_root=source_root,
+        output_root=output_root,
+        config_root=config_root,
+    )
+    response = TestClient(
+        create_app(tmp_path / "visionguard.db", settings, RecordingQueue())
+    ).post(
+        "/analyze",
+        json={
+            "source_path": str(source_root / "test.mp4"),
+            "output_path": str(output_root / "output.mp4"),
+            "config_path": str(config_path),
+        },
+    )
+
+    run_id = response.json()["run_id"]
+    logging_config = captured["args"][1]["logging"]
+    assert response.status_code == 202
+    assert logging_config["event_jsonl_path"].endswith(f"events.{run_id}.jsonl")
+    assert logging_config["run_metadata_path"].endswith(f"metadata.{run_id}.json")
 
 
 def test_rejects_missing_analysis_config(tmp_path: Path):

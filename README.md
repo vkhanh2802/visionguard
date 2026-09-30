@@ -97,15 +97,52 @@ configs/default.yaml
 configs/week4_video_a.yaml
 configs/week4_video_b.yaml
 configs/week4_video_c.yaml
+configs/week6.yaml
+configs/person_tracking_final.yaml
 ```
 
 Each config specifies the model, confidence threshold, line, ROI polygon, event
 thresholds, output codec, and event artifact paths. CLI values explicitly supplied
 by the user override YAML values.
 
+For cameras with temporary occlusion, `tracking.tracker_config` can reference a
+custom Ultralytics ByteTrack YAML. `configs/bytetrack_week6.yaml` keeps lost tracks
+for 75 frames. Loitering can additionally preserve a visit across a replacement
+track ID when `id_reassociation_frames` and `id_reassociation_distance_px` are both
+positive. This is a bounded position/time continuity heuristic, not appearance-based
+person re-identification; tune it per camera to avoid merging nearby people.
+
+`configs/person_tracking_final.yaml` is the tracking-only configuration selected by the
+camera ground-truth benchmark. It uses asynchronous FFmpeg H.264 NVENC output. This mode
+requires `ffmpeg` on `PATH` with the `h264_nvenc` encoder; the default output backend remains
+portable synchronous OpenCV. The writer queue is bounded by
+`output.writer_queue_size` to prevent unbounded frame memory growth.
+
+Week 6 also enables conservative track continuity. A replacement ID must remain
+compatible by class, position, motion, and bounding-box size for two consecutive frames;
+ambiguous nearby-person matches are rejected. The continuity window is 5 frames, with a
+minimum one-frame detection gap before a replacement can be considered. The existing
+bounded loitering reassociation remains enabled as a fallback while the new continuity
+layer is evaluated.
+
+For this camera, Week 6 keeps a loiter visit eligible for ID reassociation for up to 750
+frames (about 30 seconds at 25 FPS) within a 60-pixel position gate. This prevents one
+person's long chain of tracker IDs from producing multiple loitering events.
+
+Week 6 also quarantines a younger, contained duplicate box from event processing while it
+is confirmed across three consecutive compatible observations. Raw tracker output and
+annotated video remain unchanged for auditability. Duplicate state is retained for 5
+frames so short detector gaps do not reset confirmation. After a duplicate pair is
+confirmed, event-ID handoff remains available for only 5 frames, so a short primary-track
+gap does not create a second visit for the same person.
+
 The repository files above remain version-controlled templates. Runtime API and CLI
 defaults use the copied editable configs in `C:\VisionGuard\configs`; input videos and
 new output videos use `C:\VisionGuard\videos` and `C:\VisionGuard\outputs`.
+
+The Week 6 camera evaluation selected confidence 0.40 with ByteTrack `track_buffer: 75`.
+The rejected confidence and tracker experiments were kept out of the runtime config
+folder after evaluation.
 
 ```text
 CLI override > YAML config > model default
@@ -116,6 +153,16 @@ CLI override > YAML config > model default
 ```bash
 python -m scripts.run_video --config C:/VisionGuard/configs/week4_video_a.yaml --source C:/VisionGuard/videos/videoA.mp4 --output C:/VisionGuard/outputs/week7_videoA.mp4 --no-display
 ```
+
+Evaluate raw ByteTrack and canonical continuity on the seven unique MOT17 training
+sequences without converting image sequences to video:
+
+```bash
+python -m scripts.evaluate_mot17 --dataset MOT17 --config C:/VisionGuard/configs/week6.yaml --output-dir data/mot17_benchmark/conf_010 --variant FRCNN --conf 0.10 --disable-continuity
+```
+
+The dataset and generated prediction files are ignored by Git. See
+`docs/mot17_baseline.md` for the current baseline and interpretation.
 
 ## HTTP API
 

@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from src.analysis_service import create_analysis_job, execute_analysis_job
+from src.analysis_service import (
+    create_analysis_job,
+    execute_analysis_job,
+    scope_artifact_paths_for_run,
+)
 from src.config import AppConfig, load_config
 from src.database import SQLiteRepository
 from src.events import Event
@@ -92,3 +96,19 @@ def test_marks_run_failed_when_pipeline_raises(tmp_path: Path, monkeypatch):
     run = repository.get_run(job.run_id)
     assert run["status"] == "failed"
     assert run["error_message"] == "Cannot open video"
+
+
+def test_scopes_event_artifacts_to_run_id(tmp_path: Path):
+    config_data = load_test_config().model_dump(mode="python")
+    config_data["logging"] = {
+        "level": "INFO",
+        "event_jsonl_path": tmp_path / "events.jsonl",
+        "run_metadata_path": tmp_path / "metadata.json",
+    }
+    config = AppConfig.model_validate(config_data)
+
+    scoped = scope_artifact_paths_for_run(config, "run-1")
+
+    assert config.logging.event_jsonl_path == tmp_path / "events.jsonl"
+    assert scoped.logging.event_jsonl_path == tmp_path / "events.run-1.jsonl"
+    assert scoped.logging.run_metadata_path == tmp_path / "metadata.run-1.json"

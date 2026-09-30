@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import numpy as np
+
 from src.config import AppConfig, load_config
 from src.pipeline import VideoPipeline
 from src.tracking import Track
+from src.tracking.history import TrackHistory
 
 
 def make_track(track_id: int, point: tuple[int, int]) -> Track:
@@ -91,6 +94,27 @@ def test_pipeline_does_not_create_disabled_engines():
     assert line_engine is None
     assert intrusion_engine is None
     assert loitering_engine is None
+
+
+def test_pipeline_hides_event_counts_when_all_events_are_disabled(monkeypatch):
+    pipeline = VideoPipeline(load_test_config())
+    draw_calls = []
+    monkeypatch.setattr(
+        "src.pipeline.video_pipeline.draw_event_counts",
+        lambda *args, **kwargs: draw_calls.append((args, kwargs)),
+    )
+
+    pipeline._draw_frame(
+        frame=np.zeros((100, 100, 3), dtype=np.uint8),
+        tracks=[],
+        track_history=TrackHistory(max_length=5, max_missing_frames=1),
+        processing_fps=30.0,
+        line_engine=None,
+        intrusion_engine=None,
+        loitering_engine=None,
+    )
+
+    assert draw_calls == []
 
 def test_new_engine_set_starts_with_clean_state():
     pipeline = VideoPipeline(load_test_config())

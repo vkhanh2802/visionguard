@@ -6,6 +6,7 @@ dependencies:
   - pip
   - pip:
       - ultralytics
+      - lap >=0.5, <1
       - opencv-python
       - pytest
       - pydantic >=2, <3

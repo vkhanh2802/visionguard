@@ -75,7 +75,18 @@ def test_loads_valid_config(tmp_path: Path, valid_config_data: dict):
     assert config.detection.target_classes == {"person"}
     assert config.events.intrusion.entry_confirmation_frames == 1
     assert config.events.intrusion.exit_confirmation_frames == 1
+    assert config.tracking.tracker_config is None
+    assert config.tracking.continuity_enabled is False
+    assert config.tracking.continuity_max_gap_frames == 5
+    assert config.tracking.continuity_min_gap_frames == 2
+    assert config.tracking.continuity_confirmation_frames == 2
+    assert config.tracking.duplicate_suppression_enabled is False
+    assert config.tracking.duplicate_confirmation_frames == 3
+    assert config.tracking.duplicate_state_retention_frames == 5
+    assert config.tracking.duplicate_max_handoff_gap_frames == 5
     assert config.events.loitering.dwell_threshold_seconds == 5.0
+    assert config.events.loitering.id_reassociation_frames == 0
+    assert config.events.loitering.id_reassociation_distance_px == 0.0
     assert config.events.zones["restricted-zone-1"].polygon[0] == (100, 100)
 
 
@@ -87,6 +98,25 @@ def test_default_config_loads():
     assert config.events.intrusion.zone_id == "restricted-zone-1"
     assert config.events.intrusion.entry_confirmation_frames == 6
     assert config.events.intrusion.exit_confirmation_frames == 6
+    assert config.tracking.tracker_config is None
+
+
+def test_week6_duplicate_handoff_is_bounded():
+    project_root = Path(__file__).resolve().parents[1]
+
+    config = load_config(project_root / "configs" / "week6.yaml")
+
+    assert config.tracking.duplicate_state_retention_frames == 5
+    assert config.tracking.duplicate_max_handoff_gap_frames == 5
+
+
+def test_loads_custom_tracker_config(tmp_path: Path, valid_config_data: dict):
+    data = deepcopy(valid_config_data)
+    data["tracking"]["tracker_config"] = "configs/bytetrack_camera.yaml"
+
+    config = load_config(write_config(tmp_path, data))
+
+    assert config.tracking.tracker_config == Path("configs/bytetrack_camera.yaml")
 
 
 @pytest.mark.parametrize("confidence", [-0.1, 1.1])
@@ -145,6 +175,17 @@ def test_rejects_non_positive_loitering_threshold(tmp_path: Path, valid_config_d
     data["events"]["loitering"]["dwell_threshold_seconds"] = 0
 
     with pytest.raises(ValidationError, match="dwell_threshold_seconds"):
+        load_config(write_config(tmp_path, data))
+
+
+def test_rejects_partial_loitering_id_reassociation_config(
+    tmp_path: Path,
+    valid_config_data: dict,
+):
+    data = deepcopy(valid_config_data)
+    data["events"]["loitering"]["id_reassociation_frames"] = 30
+
+    with pytest.raises(ValidationError, match="id_reassociation_frames"):
         load_config(write_config(tmp_path, data))
 
 

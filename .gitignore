@@ -7,6 +7,7 @@ data/outputs/*
 data/*.db
 
 *.pt
+*.onnx
 runs/
 
 .vscode/
@@ -14,3 +15,8 @@ runs/
 
 web/node_modules/
 web/dist/
+
+/MOT17/
+/MOT17*.zip
+/data/mot17_benchmark/
+/datasets/
