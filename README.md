@@ -228,9 +228,10 @@ frames so short detector gaps do not reset confirmation. After a duplicate pair 
 confirmed, event-ID handoff remains available for only 5 frames, so a short primary-track
 gap does not create a second visit for the same person.
 
-The repository files above remain version-controlled templates. Runtime API and CLI
-defaults use the copied editable configs in `C:\VisionGuard\configs`; input videos and
-new output videos use `C:\VisionGuard\videos` and `C:\VisionGuard\outputs`.
+The repository files above remain version-controlled templates. Run CLI commands from the
+repository root so relative paths such as `configs/default.yaml`, `data/videos/`, and
+`data/outputs/` work on Windows, macOS, and Linux. API storage roots are configurable and
+do not need to use a particular drive or home directory.
 
 The Week 6 camera evaluation selected confidence 0.40 with ByteTrack `track_buffer: 75`.
 The rejected confidence and tracker experiments were kept out of the runtime config
@@ -243,14 +244,17 @@ CLI override > YAML config > model default
 ## Usage
 
 ```bash
-python -m scripts.run_video --config C:/VisionGuard/configs/week4_video_a.yaml --source C:/VisionGuard/videos/videoA.mp4 --output C:/VisionGuard/outputs/week7_videoA.mp4 --no-display
+python -m scripts.run_video --config configs/person_tracking_final.yaml --source path/to/input.mp4 --output data/outputs/annotated.mp4 --no-display
 ```
+
+Replace `path/to/input.mp4` with the path to a video on your machine. Relative and absolute
+paths are both accepted by the CLI.
 
 Evaluate raw ByteTrack and canonical continuity on the seven unique MOT17 training
 sequences without converting image sequences to video:
 
 ```bash
-python -m scripts.evaluate_mot17 --dataset MOT17 --config C:/VisionGuard/configs/week6.yaml --output-dir data/mot17_benchmark/conf_010 --variant FRCNN --conf 0.10 --disable-continuity
+python -m scripts.evaluate_mot17 --dataset path/to/MOT17 --config configs/week6.yaml --output-dir data/mot17_benchmark/conf_010 --variant FRCNN --conf 0.10 --disable-continuity
 ```
 
 The dataset and generated prediction files are ignored by Git. See
@@ -284,13 +288,15 @@ runs inference, changing the status to `running`, then `completed` or `failed`. 
 
 ```json
 {
-  "source_path": "C:/VisionGuard/videos/test.mp4",
-  "config_path": "C:/VisionGuard/configs/default.yaml"
+  "source_path": "<absolute-source-root>/test.mp4",
+  "config_path": "<absolute-config-root>/default.yaml"
 }
 ```
 
-The server creates `C:/VisionGuard/outputs/<run_id>/annotated.mp4` and persists that
-resolved path with the run.
+Replace the angle-bracket placeholders with absolute directories on your machine. Set
+`VISIONGUARD_SOURCE_ROOT`, `VISIONGUARD_CONFIG_ROOT`, and `VISIONGUARD_OUTPUT_ROOT` to the
+same directories before starting the API. The server creates
+`<absolute-output-root>/<run_id>/annotated.mp4` and persists that resolved path with the run.
 
 See [API guide](docs/api.md) for request examples, lifecycle behavior, and error codes.
 
@@ -312,11 +318,9 @@ The dashboard provides a form to start analysis jobs, a selectable run list, aut
 polling for active runs, run analytics, event records, error visibility, and completed
 annotated-video download.
 
-For safety, requested source/config paths must stay inside `C:\VisionGuard\videos` and
-`C:\VisionGuard\configs`; server-owned artifacts stay inside `C:\VisionGuard\outputs`.
-See
-[API guide](docs/api.md) for environment variables that change these local roots or
-dashboard CORS origins.
+For safety, requested source/config paths must stay inside the configured source and config
+roots; server-owned artifacts stay inside the configured output root. See the
+[API guide](docs/api.md) for environment-variable examples and dashboard CORS settings.
 
 ## Redis Queue Service
 
@@ -341,7 +345,7 @@ python -m scripts.run_worker
 ## CLI Overrides
 
 ```bash
-python -m scripts.run_video --config C:/VisionGuard/configs/week4_video_a.yaml --source C:/VisionGuard/videos/videoA.mp4 --output C:/VisionGuard/outputs/week7_videoA_conf_05.mp4 --conf 0.5 --no-display
+python -m scripts.run_video --config configs/default.yaml --source path/to/input.mp4 --output data/outputs/annotated_conf_05.mp4 --conf 0.5 --no-display
 ```
 
 `--conf`, `--model`, and `--no-display` override their config counterparts for the
