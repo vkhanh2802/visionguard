@@ -458,6 +458,19 @@ class SQLiteRepository:
 
         return True
 
+    def is_writable(self) -> bool:
+        try:
+            with closing(self._connect()) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "UPDATE analysis_runs SET status = status WHERE 0"
+                )
+                connection.rollback()
+        except sqlite3.Error:
+            return False
+
+        return True
+
     @staticmethod
     def _validate_pagination(limit: int, offset: int) -> None:
         if limit < 1:

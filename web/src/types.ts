@@ -77,9 +77,22 @@ export interface RunAnalytics {
     max_gap_frames: number;
     median_observed_frames: number | null;
     track_lifetimes: TrackLifetime[];
+    timing: TimingDiagnostics | null;
     continuity: ContinuityDiagnostics | null;
     deduplication: DeduplicationDiagnostics | null;
   } | null;
+}
+
+export interface TimingDiagnostics {
+  read_seconds: number;
+  tracking_seconds: number;
+  analytics_seconds: number;
+  drawing_seconds: number;
+  write_enqueue_seconds: number;
+  encoding_seconds: number;
+  writer_flush_seconds: number;
+  frame_loop_seconds: number;
+  tracking_fps: number;
 }
 
 export interface TrackLifetime {
@@ -129,7 +142,6 @@ export interface ConfirmedDuplicatePair {
 
 export interface AnalysisRequest {
   source_path: string;
-  output_path: string;
   config_path: string;
 }
 

@@ -1,5 +1,10 @@
 # Week 6 Summary: Persistence And HTTP API
 
+> Historical milestone: the current implementation uses Redis/RQ rather than an
+> in-process background task, includes a React dashboard and `/readiness`, and scopes all
+> API artifacts under `outputs/<run_id>/`. See the main README and API guide for current
+> operation.
+
 ## Objective
 
 Week 6 moved VisionGuard from file-oriented local execution to a persisted video

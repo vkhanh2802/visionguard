@@ -15,6 +15,12 @@ The in-repository evaluator scores valid MOT17 pedestrian annotations, removes u
 predictions that overlap distractor regions, and reports HOTA, DetA, AssA, LocA, MOTA,
 MOTP, IDF1, identity switches, fragmentations, precision, and recall.
 
+The camera-1 and camera-3 results below were regenerated after the evaluator was corrected.
+Local validation against TrackEval commit `12c8791b303e0a0b50f753af204249e622d0281a` matched every reported
+metric and count. The earlier MOT17 tables are retained as historical experiment notes, but
+were produced before that correction. The MOT17 ground truth is not currently present in the
+workspace, so those tables must not be used as final benchmark evidence until they are rerun.
+
 ## Aggregate Results
 
 | Output | HOTA | DetA | AssA | MOTA | IDF1 | IDSW | Precision | Recall |
@@ -145,12 +151,12 @@ logic excluded:
 
 | Model | Confidence | HOTA | DetA | AssA | MOTA | IDF1 | Precision | Recall | IDSW |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Pretrained | 0.30 | **40.940** | **32.403** | 51.771 | **38.789** | **49.453** | 94.021 | **41.782** | 78 |
-| Pretrained | 0.40 | 40.175 | 29.542 | **54.640** | 36.025 | 49.161 | 96.185 | 37.670 | 35 |
-| Pretrained | 0.50 | 34.547 | 24.615 | 48.491 | 30.151 | 42.319 | **97.485** | 31.051 | **23** |
-| MOT17 A | 0.30 | 28.281 | **27.214** | 30.724 | -3.329 | 29.898 | 48.740 | **39.401** | 300 |
-| MOT17 A | 0.40 | **30.592** | 26.243 | 36.468 | 12.242 | 34.467 | 61.654 | 34.582 | 193 |
-| MOT17 A | 0.50 | 29.357 | 23.361 | **37.337** | **18.714** | **34.617** | **73.761** | 29.682 | **95** |
+| Pretrained | 0.30 | **40.905** | **32.252** | 51.928 | **38.789** | **49.548** | 94.021 | **41.782** | 78 |
+| Pretrained | 0.40 | 40.166 | 29.495 | **54.704** | 36.025 | 49.205 | 96.185 | 37.670 | 35 |
+| Pretrained | 0.50 | 34.525 | 24.501 | 48.653 | 30.151 | 42.338 | **97.485** | 31.051 | **23** |
+| MOT17 A | 0.30 | 28.190 | **26.740** | 31.151 | -3.380 | 30.184 | 48.724 | **39.388** | 306 |
+| MOT17 A | 0.40 | **30.526** | 25.870 | 36.871 | 12.212 | 34.666 | 61.638 | 34.573 | 196 |
+| MOT17 A | 0.50 | 29.325 | 23.216 | **37.503** | **18.680** | **34.678** | **73.719** | 29.665 | **95** |
 
 The proxy increase in active tracks did not translate to better ground-truth accuracy.
 Experiment A produced thousands more false positives and substantially weaker association
@@ -171,14 +177,22 @@ baseline and 0.40 for MOT17 A. No threshold was selected using camera 3 results.
 
 | Model | Confidence | HOTA | DetA | AssA | MOTA | IDF1 | Precision | Recall | IDSW |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Pretrained | 0.30 | **57.349** | 50.172 | **65.804** | **63.808** | **77.494** | **95.304** | 67.240 | **13** |
-| MOT17 A | 0.40 | 54.922 | **50.815** | 59.689 | 54.151 | 72.927 | 71.886 | **90.051** | 75 |
+| Pretrained | 0.30 | **57.349** | 50.171 | **65.805** | **63.790** | **77.504** | **95.304** | 67.240 | **15** |
+| MOT17 A | 0.40 | 54.872 | **50.644** | 59.797 | 54.114 | 73.444 | 71.886 | **90.051** | 79 |
 
 MOT17 A recovers substantially more people, but its 3,869 false positives versus 364 for the
 baseline reduce MOTA and identity quality. Camera 3 therefore confirms the camera-1 model
 selection: retain `yolo26n.pt`. The more complex `2.mp4` remains unannotated, so these results
 must not be presented as validation for that scene. The production configuration is not
 modified automatically.
+
+Each regenerated camera report records the SHA-256 hashes of the video, ground truth,
+predictions, configuration, tracker configuration, tracking implementation, evaluator,
+benchmark script, and model checkpoints.
+It also records the Git state, command, Python/package versions, CUDA version, and GPU. The
+per-prediction TrackEval comparisons are stored under each report directory's `validation/`
+folder and require an empty `differences` object to pass. A sanitized summary of the local
+results and artifact hashes is tracked in [the evaluation evidence manifest](evaluation_evidence.md).
 
 ## Final Person-Tracking Regression
 
@@ -270,7 +284,7 @@ python scripts/prepare_camera_ground_truth.py `
 python -m scripts.evaluate_camera_tracking `
   --video datasets/person_tracking/camera/1.mp4 `
   --ground-truth datasets/person_tracking/camera_ground_truth/camera-1/gt/gt.txt `
-  --config C:/VisionGuard/configs/week6.yaml `
+  --config configs/person_tracking_final.yaml `
   --output-dir data/outputs/camera_tracking_benchmark `
   --confidences 0.30 0.40 0.50
 ```
@@ -287,10 +301,20 @@ python scripts/prepare_camera_ground_truth.py `
 python -m scripts.evaluate_camera_tracking `
   --video datasets/person_tracking/camera/3.mp4 `
   --ground-truth datasets/person_tracking/camera_ground_truth/camera-3/gt/gt.txt `
-  --config C:/VisionGuard/configs/week6.yaml `
+  --config configs/person_tracking_final.yaml `
   --output-dir data/outputs/camera_tracking_holdout/camera-3 `
   --baseline-confidence 0.30 `
   --candidate-confidence 0.40
+```
+
+Validate a prediction file against an official TrackEval checkout with:
+
+```powershell
+python scripts/validate_mot_evaluator.py `
+  --ground-truth datasets/person_tracking/camera_ground_truth/camera-3/gt/gt.txt `
+  --predictions data/outputs/camera_tracking_holdout/camera-3/predictions/baseline_conf_0p30.txt `
+  --trackeval-root C:/path/to/TrackEval `
+  --trackeval-python C:/path/to/python-with-scipy.exe
 ```
 
 Run the final selected model on all camera videos with:

@@ -1,3 +1,8 @@
+import shutil
+import subprocess
+import tempfile
+from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
@@ -6,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from redis import Redis
 from redis.exceptions import RedisError
-from rq import Queue
+from rq import Queue, Worker
 
 from src.analysis_jobs import execute_queued_analysis
 from src.analysis_service import scope_artifact_paths_for_run
@@ -20,6 +25,7 @@ from src.api.schemas import (
     EventListResponse,
     EventResponse,
     HealthResponse,
+    ReadinessResponse,
     RunAnalyticsResponse,
     RunListResponse,
     RunResponse,
@@ -38,7 +44,11 @@ def create_app(
     settings = settings or ApiSettings.from_environment()
     queue = queue or Queue(
         settings.queue_name,
-        connection=Redis.from_url(settings.redis_url),
+        connection=Redis.from_url(
+            settings.redis_url,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        ),
     )
 
     app = FastAPI(
@@ -63,6 +73,7 @@ def create_app(
             service="VisionGuard API",
             docs_url="/docs",
             health_url="/health",
+            readiness_url="/readiness",
             runs_url="/runs",
             events_url="/events",
         )
@@ -78,6 +89,23 @@ def create_app(
             )
 
         return HealthResponse(status="ok", database="connected")
+
+    @app.get("/readiness", response_model=ReadinessResponse)
+    def readiness(
+        repository: SQLiteRepository = Depends(get_repository),
+        settings: ApiSettings = Depends(get_settings),
+        queue: Queue = Depends(get_queue),
+    ) -> ReadinessResponse:
+        checks = _readiness_checks(repository, settings, queue)
+        required_checks = (
+            checks["database_writable"],
+            checks["redis_connected"],
+            checks["worker_available"],
+            checks["output_writable"],
+        )
+        if not all(required_checks):
+            raise HTTPException(status_code=503, detail=checks)
+        return ReadinessResponse(status="ready", **checks)
 
     @app.get("/runs", response_model=RunListResponse)
     def list_runs(
@@ -209,9 +237,8 @@ def create_app(
         queue: Queue = Depends(get_queue),
     ) -> AnalyzeAcceptedResponse:
         try:
-            source_path, output_path, config_path = settings.validate_analysis_paths(
+            source_path, config_path = settings.validate_analysis_paths(
                 request.source_path,
-                request.output_path,
                 request.config_path,
             )
             config = _load_api_config(config_path)
@@ -219,7 +246,11 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(error)) from error
 
         run_id = str(uuid4())
-        config = scope_artifact_paths_for_run(config, run_id)
+        output_path = settings.run_output_path(run_id)
+        try:
+            config = scope_artifact_paths_for_run(config, output_path.parent)
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
         config_data = config.model_dump(mode="json")
         repository.create_run(
             run_id=run_id,
@@ -257,6 +288,101 @@ def _load_api_config(config_path: str) -> AppConfig:
     config_data = config.model_dump(mode="python")
     config_data["output"]["display"] = False
     return AppConfig.model_validate(config_data)
+
+
+def _readiness_checks(
+    repository: SQLiteRepository,
+    settings: ApiSettings,
+    queue: Queue,
+) -> dict[str, bool]:
+    redis_connected = False
+    worker_available = False
+    try:
+        redis_connected = bool(queue.connection.ping())
+        worker_available = _worker_available(queue)
+    except RedisError:
+        pass
+
+    ffmpeg_available, nvenc_available = _ffmpeg_capabilities()
+    return {
+        "database_writable": repository.is_writable(),
+        "redis_connected": redis_connected,
+        "worker_available": worker_available,
+        "output_writable": _directory_is_writable(settings.output_root),
+        "ffmpeg_available": ffmpeg_available,
+        "nvenc_available": nvenc_available,
+    }
+
+
+def _worker_available(queue: Queue) -> bool:
+    for worker in Worker.all(queue=queue):
+        state = worker.get_state()
+        heartbeat = worker.last_heartbeat
+        if heartbeat is None or state not in {"idle", "busy"}:
+            continue
+        if state == "busy":
+            max_age_seconds = 2 * getattr(worker, "job_monitoring_interval", 30) + 60
+        else:
+            max_age_seconds = getattr(worker, "worker_ttl", 420) + 60
+        heartbeat_age = (datetime.now(timezone.utc) - heartbeat).total_seconds()
+        if heartbeat_age <= max_age_seconds:
+            return True
+    return False
+
+
+def _directory_is_writable(path: Path) -> bool:
+    try:
+        Path(path).mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=path):
+            pass
+    except OSError:
+        return False
+    return True
+
+
+@lru_cache(maxsize=1)
+def _ffmpeg_capabilities() -> tuple[bool, bool]:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        return False, False
+    try:
+        completed = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False, False
+    if "h264_nvenc" not in completed.stdout:
+        return True, False
+    try:
+        nvenc_probe = subprocess.run(
+            [
+                ffmpeg_path,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=size=320x180:rate=1",
+                "-frames:v",
+                "1",
+                "-c:v",
+                "h264_nvenc",
+                "-f",
+                "null",
+                "-",
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return True, False
+    return True, nvenc_probe.returncode == 0
 
 
 app = create_app()

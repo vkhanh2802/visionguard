@@ -27,7 +27,8 @@ POST /analyze
 
 FastAPI and the RQ worker run as separate processes. Redis retains queued jobs across
 an API restart. Keep one RQ worker running for local operation; on Windows VisionGuard
-uses RQ `SimpleWorker` to avoid Unix-only fork APIs.
+uses a heartbeat-enabled RQ `SimpleWorker` to avoid Unix-only fork APIs while keeping
+long-running jobs visible to readiness checks.
 
 ## Endpoints
 
@@ -35,12 +36,19 @@ uses RQ `SimpleWorker` to avoid Unix-only fork APIs.
 | ------ | ---- | ------- | ----------- |
 | `GET` | `/` | `200` | Service name and main endpoint links. |
 | `GET` | `/health` | `200` | SQLite connectivity status. |
+| `GET` | `/readiness` | `200`/`503` | Job-processing dependency status. |
 | `GET` | `/runs` | `200` | Paginated runs ordered newest first. |
 | `GET` | `/runs/{run_id}` | `200` | One persisted run. |
 | `GET` | `/runs/{run_id}/analytics` | `200` | Counters and aggregate event metrics. |
 | `GET` | `/runs/{run_id}/output` | `200` | Download completed annotated video. |
 | `GET` | `/events` | `200` | Paginated events. |
 | `POST` | `/analyze` | `202` | Create and start an analysis job. |
+
+`/readiness` returns `503` when database writes, Redis, a current RQ worker heartbeat, or
+output storage is unavailable. `ffmpeg_available` and `nvenc_available` are informational
+capability fields because each analysis config selects its own encoder; an OpenCV-backed job
+does not require either capability. The NVENC result comes from a cached one-frame encode
+probe, not only from FFmpeg's encoder list.
 
 ## Create An Analysis Job
 
@@ -50,7 +58,6 @@ Content-Type: application/json
 
 {
   "source_path": "C:/VisionGuard/videos/test.mp4",
-  "output_path": "C:/VisionGuard/outputs/api-output.mp4",
   "config_path": "C:/VisionGuard/configs/default.yaml"
 }
 ```
@@ -61,12 +68,14 @@ disables the OpenCV preview window, regardless of the YAML `output.display` sett
 For trusted local use, the default path policy permits:
 
 ```text
-Source videos: C:\VisionGuard\videos\
-Output videos: C:\VisionGuard\outputs\
-Configuration: C:\VisionGuard\configs\
+Requested source videos: C:\VisionGuard\videos\
+Server-owned output videos: C:\VisionGuard\outputs\<run_id>\annotated.mp4
+Requested configuration: C:\VisionGuard\configs\
 ```
 
-The API resolves every requested path and rejects paths outside these roots with `422`.
+The API resolves every requested source/config path and rejects paths outside these roots
+with `422`. It generates the output path after assigning the run ID, so concurrent runs
+cannot select or overwrite a shared filename.
 Override the defaults before starting Uvicorn when another local storage layout is
 needed:
 
@@ -82,7 +91,7 @@ Successful acceptance:
 ```json
 {
   "run_id": "018f8ed4-2c5a-7baa-8fe4-184cf0e83afc",
-  "status": "running"
+  "status": "queued"
 }
 ```
 
@@ -135,6 +144,17 @@ runs completed before diagnostics were added return `"tracking": null`.
     "max_gap_frames": 6,
     "median_observed_frames": 42.5,
     "track_lifetimes": [],
+    "timing": {
+      "read_seconds": 1.2,
+      "tracking_seconds": 18.7,
+      "analytics_seconds": 0.4,
+      "drawing_seconds": 1.1,
+      "write_enqueue_seconds": 0.2,
+      "encoding_seconds": 5.8,
+      "writer_flush_seconds": 0.3,
+      "frame_loop_seconds": 22.1,
+      "tracking_fps": 38.6
+    },
     "continuity": {
       "replacement_match_count": 2,
       "pending_match_count": 3,
@@ -188,6 +208,7 @@ its output file does not exist.
 | Missing or invalid analysis config | `422` | Configuration error details. |
 | Output requested before completion | `409` | Output unavailable for current run status. |
 | Completed run whose output was deleted | `404` | Output file not found. |
+| Required processing dependency unavailable | `503` | `/readiness` returns every dependency and capability check. |
 
 ## Persistence
 
@@ -199,8 +220,8 @@ analysis_runs: lifecycle, config, paths, metrics, counters, errors
 
 JSONL event and metadata files are optional exports. Configure both logging paths to
 enable them; they share the SQLite `run_id` but are not read by the API. For API and
-dashboard submissions, the API inserts the `run_id` before each filename extension, so
-reruns never overwrite a prior run's artifacts.
+dashboard submissions, the API creates one directory per `run_id`, so reruns never
+overwrite a prior run's artifacts.
 
 ## Browser Access
 

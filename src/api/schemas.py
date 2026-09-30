@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -8,10 +8,21 @@ class HealthResponse(BaseModel):
     database: Literal["connected"]
 
 
+class ReadinessResponse(BaseModel):
+    status: Literal["ready"]
+    database_writable: bool
+    redis_connected: bool
+    worker_available: bool
+    output_writable: bool
+    ffmpeg_available: bool
+    nvenc_available: bool
+
+
 class ApiIndexResponse(BaseModel):
     service: Literal["VisionGuard API"]
     docs_url: str
     health_url: str
+    readiness_url: str
     runs_url: str
     events_url: str
 
@@ -65,8 +76,9 @@ class EventListResponse(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     source_path: str = Field(min_length=1)
-    output_path: str = Field(min_length=1)
     config_path: str = "C:/VisionGuard/configs/default.yaml"
 
 
@@ -115,6 +127,7 @@ class TrackingDiagnosticsResponse(BaseModel):
     max_gap_frames: int
     median_observed_frames: float | None
     track_lifetimes: list[TrackLifetimeResponse]
+    timing: "TimingDiagnosticsResponse | None" = None
     continuity: "ContinuityDiagnosticsResponse | None" = None
     deduplication: "DeduplicationDiagnosticsResponse | None" = None
 
@@ -125,6 +138,18 @@ class ContinuityDiagnosticsResponse(BaseModel):
     rejected_ambiguous_match_count: int
     rejected_gap_match_count: int
     replacement_matches: list["ReplacementMatchResponse"] = Field(default_factory=list)
+
+
+class TimingDiagnosticsResponse(BaseModel):
+    read_seconds: float
+    tracking_seconds: float
+    analytics_seconds: float
+    drawing_seconds: float
+    write_enqueue_seconds: float
+    encoding_seconds: float
+    writer_flush_seconds: float
+    frame_loop_seconds: float
+    tracking_fps: float
 
 
 class ReplacementMatchResponse(BaseModel):

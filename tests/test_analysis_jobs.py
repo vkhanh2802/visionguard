@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from src.analysis_jobs import execute_queued_analysis
 from src.config import AppConfig, load_config
 from src.database import SQLiteRepository
@@ -70,3 +72,36 @@ def test_queued_job_starts_pipeline_and_completes_run(tmp_path: Path, monkeypatc
     assert result.processed_frames == 100
     assert repository.get_run("run-1")["status"] == "completed"
     assert repository.list_events("run-1")[0]["track_id"] == 7
+
+
+def test_queued_job_marks_run_failed_when_encoder_fails(tmp_path: Path, monkeypatch):
+    class FailingVideoPipeline:
+        def __init__(self, config: AppConfig, event_handler):
+            pass
+
+        def run(self, source_path: Path, output_path: Path) -> PipelineResult:
+            raise RuntimeError("FFmpeg NVENC encoding failed")
+
+    monkeypatch.setattr("src.analysis_service.VideoPipeline", FailingVideoPipeline)
+    repository = SQLiteRepository(tmp_path / "visionguard.db")
+    config_data = load_test_config().model_dump(mode="json")
+    repository.create_run(
+        "run-1",
+        "input.mp4",
+        "output.mp4",
+        config_data,
+        status="queued",
+    )
+
+    with pytest.raises(RuntimeError, match="FFmpeg NVENC encoding failed"):
+        execute_queued_analysis(
+            "run-1",
+            config_data,
+            "input.mp4",
+            "output.mp4",
+            str(repository.database_path),
+        )
+
+    run = repository.get_run("run-1")
+    assert run["status"] == "failed"
+    assert run["error_message"] == "FFmpeg NVENC encoding failed"

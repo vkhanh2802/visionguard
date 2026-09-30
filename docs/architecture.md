@@ -5,31 +5,23 @@
 VisionGuard processes a local video into an annotated output video, persisted events,
 and run metadata. SQLite is the persistence source of truth; JSONL is optional.
 
-```text
-CLI or FastAPI
-  |
-  v
-YAML Config -> AppConfig
-  |
-  v
-AnalysisService -> RunRecorder
-  |-- SQLiteRepository -> analysis_runs + events
-  |-- Optional EventJsonlWriter -> JSONL + metadata
-  |
-  v
-VideoPipeline
-  |
-  |-- OpenCV VideoCapture
-  |-- YOLO + ByteTrack
-  |-- TrackHistory
-  |-- LineCrossingEngine
-  |-- IntrusionEngine
-  |-- LoiteringEngine
-  |-- Visualization
-  |-- OpenCV VideoWriter
-  |
-  v
-PipelineResult + Annotated Output Video
+```mermaid
+flowchart TD
+    CLI[CLI] --> S[AnalysisService]
+    UI[React dashboard] --> API[FastAPI]
+    API --> Q[(Redis)]
+    Q --> W[RQ worker]
+    W --> S
+    S --> R[RunRecorder]
+    R --> DB[(SQLite runs and events)]
+    S --> P[VideoPipeline]
+    P --> C[OpenCV capture]
+    C --> T[YOLO + ByteTrack]
+    T --> E[Event engines]
+    E --> R
+    P --> V[Visualization]
+    V --> O[OpenCV or async NVENC writer]
+    O --> A[outputs/run_id/annotated.mp4]
 ```
 
 ## Module Responsibilities
@@ -45,7 +37,9 @@ PipelineResult + Annotated Output Video
 | `src/database/sqlite_repository.py` | Creates SQLite schema and persists/queries runs, events, analytics, and interrupted runs. |
 | `src/run_recorder.py` | Records a shared `run_id` to SQLite and optional JSONL artifacts. |
 | `src/analysis_service.py` | Creates and executes reusable analysis jobs for both CLI and FastAPI. |
-| `src/api/` | Exposes FastAPI health, runs, events, analysis, analytics, and output-download endpoints. |
+| `src/api/` | Exposes liveness/readiness, runs, events, analysis, analytics, and output-download endpoints. |
+| `src/video.py` | Owns OpenCV/FFmpeg writers, bounded async encoding, stderr draining, and shutdown handling. |
+| `scripts/run_worker.py` | Runs the durable Redis/RQ analysis worker. |
 | `src/logging_config.py` | Configures readable application logging. |
 | `scripts/run_video.py` | Parses CLI arguments, resolves overrides, executes an analysis job, and prints a summary. |
 
@@ -109,8 +103,9 @@ result = pipeline.run(
 throughput, processed frame count, event counters, output path, elapsed time, and
 whether the user stopped the preview early.
 
-Each `run()` creates a new tracker, trajectory history, and event-engine set. State
-therefore does not leak from one analyzed video into the next.
+Each `run()` resets tracker state and creates a new trajectory history and event-engine
+set. A reused pipeline may retain the loaded model, but identities and event state do not
+leak from one analyzed video into the next.
 
 ## Timing
 
@@ -120,6 +115,11 @@ therefore does not leak from one analyzed video into the next.
 | `effective_fps` | Source FPS or validated `video.fps_override`; used for video timestamps. |
 | `core_processing_fps` | Rolling throughput for tracking and event processing. |
 | `end_to_end_fps` | Frame-loop throughput including read, events, visualization, and output writing. |
+
+Completed runs also persist `read_seconds`, `tracking_seconds`, `analytics_seconds`,
+`drawing_seconds`, `write_enqueue_seconds`, `encoding_seconds`, `writer_flush_seconds`,
+`frame_loop_seconds`, and `tracking_fps`. They are returned by the analytics endpoint and
+rendered in the dashboard.
 
 Event timestamps are based on source-video time, not wall-clock inference time.
 If a source does not provide a valid FPS, the pipeline requires an explicit positive
@@ -150,3 +150,13 @@ transitions the run to `running`, executes `VideoPipeline`, and persists complet
 failure. Clients poll `GET /runs/{run_id}` and can query events, analytics, or download
 the annotated video after completion. See the [API guide](api.md) and
 [Redis service guide](redis.md) for operational commands.
+
+On Windows, the in-process RQ worker runs a separate heartbeat thread while a job is active,
+so long analyses retain a current worker registration without requiring Unix process APIs.
+
+The API owns artifact naming. Each accepted run is assigned
+`output_root/<run_id>/annotated.mp4`; optional `events.jsonl` and `metadata.json` are scoped
+to the same directory. `/health` is a liveness check, while `/readiness` verifies database
+writes, Redis, a current RQ worker heartbeat, and output storage. It also reports FFmpeg
+availability and the result of a cached H.264 NVENC encode probe; those informational checks
+do not block OpenCV-backed jobs.

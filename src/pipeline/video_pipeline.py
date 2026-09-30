@@ -243,9 +243,9 @@ class VideoPipeline:
                         stopped_early = True
                         break
             active_writer = writer
-            writer = None
             writer_flush_started_at = perf_counter()
             active_writer.release()
+            writer = None
             writer_flush_seconds = perf_counter() - writer_flush_started_at
             frame_loop_elapsed = perf_counter() - frame_loop_start
             end_to_end_fps = (

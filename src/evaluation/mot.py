@@ -3,8 +3,8 @@ from configparser import ConfigParser
 from dataclasses import dataclass
 from pathlib import Path
 
-import lap
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 from src.tracking import Track
 
@@ -97,7 +97,7 @@ class MotEvaluation:
         localization_accuracy = np.divide(
             self.hota_localization_sum,
             self.hota_true_positives,
-            out=np.zeros_like(self.hota_true_positives, dtype=float),
+            out=np.ones_like(self.hota_true_positives, dtype=float),
             where=self.hota_true_positives > 0,
         )
         hota = np.sqrt(detection_accuracy * association_accuracy)
@@ -173,11 +173,11 @@ def evaluate_mot_files(
     if not 0.0 < iou_threshold <= 1.0:
         raise ValueError("iou_threshold must be in (0, 1].")
 
-    ground_truth, ignored = _load_ground_truth(ground_truth_path)
+    ground_truth, preprocessing_ground_truth = _load_ground_truth(ground_truth_path)
     predictions = _load_predictions(prediction_path)
     frames = _prepare_frames(
         ground_truth=ground_truth,
-        ignored=ignored,
+        preprocessing_ground_truth=preprocessing_ground_truth,
         predictions=predictions,
         iou_threshold=iou_threshold,
     )
@@ -239,15 +239,14 @@ def _load_ground_truth(
     path: Path,
 ) -> tuple[dict[int, list[MotDetection]], dict[int, list[MotDetection]]]:
     ground_truth: dict[int, list[MotDetection]] = defaultdict(list)
-    ignored: dict[int, list[MotDetection]] = defaultdict(list)
+    preprocessing_ground_truth: dict[int, list[MotDetection]] = defaultdict(list)
 
     for detection in _read_mot_file(path):
-        if detection.confidence > 0 and detection.class_id == 1:
+        preprocessing_ground_truth[detection.frame_id].append(detection)
+        if detection.confidence != 0 and detection.class_id == 1:
             ground_truth[detection.frame_id].append(detection)
-        elif detection.confidence <= 0 or detection.class_id in DISTRACTOR_CLASSES:
-            ignored[detection.frame_id].append(detection)
 
-    return dict(ground_truth), dict(ignored)
+    return dict(ground_truth), dict(preprocessing_ground_truth)
 
 
 def _load_predictions(path: Path) -> dict[int, list[MotDetection]]:
@@ -290,34 +289,40 @@ def _read_mot_file(path: Path, prediction: bool = False) -> list[MotDetection]:
 
 def _prepare_frames(
     ground_truth: dict[int, list[MotDetection]],
-    ignored: dict[int, list[MotDetection]],
+    preprocessing_ground_truth: dict[int, list[MotDetection]],
     predictions: dict[int, list[MotDetection]],
     iou_threshold: float,
 ) -> list[_FrameData]:
     frames: list[_FrameData] = []
-    frame_ids = sorted(set(ground_truth) | set(ignored) | set(predictions))
+    frame_ids = sorted(
+        set(ground_truth) | set(preprocessing_ground_truth) | set(predictions)
+    )
 
     for frame_id in frame_ids:
         frame_ground_truth = ground_truth.get(frame_id, [])
         frame_predictions = predictions.get(frame_id, [])
-        similarities = _iou_matrix(frame_ground_truth, frame_predictions)
-        _, matched_prediction_indices = _match_similarities(
-            similarities,
-            iou_threshold,
+        frame_preprocessing_ground_truth = preprocessing_ground_truth.get(frame_id, [])
+        preprocessing_similarities = _iou_matrix(
+            frame_preprocessing_ground_truth,
+            frame_predictions,
         )
-        matched_predictions = set(matched_prediction_indices.tolist())
-        ignored_boxes = ignored.get(frame_id, [])
-        ignored_overlaps = _ioa_matrix(ignored_boxes, frame_predictions)
+        matched_ground_truth_indices, matched_prediction_indices = _match_similarities(
+            preprocessing_similarities,
+            0.5,
+        )
+        distractor_predictions = {
+            prediction_index
+            for ground_truth_index, prediction_index in zip(
+                matched_ground_truth_indices,
+                matched_prediction_indices,
+            )
+            if frame_preprocessing_ground_truth[ground_truth_index].class_id
+            in DISTRACTOR_CLASSES
+        }
 
         keep_indices = []
         for prediction_index in range(len(frame_predictions)):
-            if prediction_index in matched_predictions:
-                keep_indices.append(prediction_index)
-                continue
-            if (
-                ignored_overlaps.size > 0
-                and np.max(ignored_overlaps[:, prediction_index]) >= 0.5
-            ):
+            if prediction_index in distractor_predictions:
                 continue
             keep_indices.append(prediction_index)
 
@@ -343,21 +348,21 @@ def _evaluate_frames(frames: list[_FrameData], iou_threshold: float) -> MotEvalu
     fragmentations = 0
     matching_iou_sum = 0.0
     last_match: dict[int, int] = {}
-    previous_matched: dict[int, bool] = {}
+    previous_timestep_match: dict[int, int] = {}
     ever_matched: set[int] = set()
     identity_matches: dict[tuple[int, int], int] = defaultdict(int)
 
     for frame in frames:
         continuity_scores = frame.similarities.copy()
         for ground_truth_index, detection in enumerate(frame.ground_truth):
-            previous_id = last_match.get(detection.track_id)
+            previous_id = previous_timestep_match.get(detection.track_id)
             if previous_id is None:
                 continue
             for prediction_index, prediction in enumerate(frame.predictions):
                 if (
                     prediction.track_id == previous_id
                     and continuity_scores[ground_truth_index, prediction_index]
-                    >= iou_threshold
+                    >= iou_threshold - np.finfo(float).eps
                 ):
                     continuity_scores[ground_truth_index, prediction_index] += 1000.0
 
@@ -374,7 +379,7 @@ def _evaluate_frames(frames: list[_FrameData], iou_threshold: float) -> MotEvalu
                 frame.similarities[matched_ground_truth, matched_predictions].sum()
             )
 
-        matched_ids: set[int] = set()
+        current_timestep_match: dict[int, int] = {}
         for ground_truth_index, prediction_index in zip(
             matched_ground_truth,
             matched_predictions,
@@ -384,23 +389,20 @@ def _evaluate_frames(frames: list[_FrameData], iou_threshold: float) -> MotEvalu
             previous_id = last_match.get(ground_truth_id)
             if previous_id is not None and previous_id != prediction_id:
                 id_switches += 1
-            if ground_truth_id in ever_matched and not previous_matched.get(
-                ground_truth_id,
-                False,
+            if (
+                ground_truth_id in ever_matched
+                and ground_truth_id not in previous_timestep_match
             ):
                 fragmentations += 1
             last_match[ground_truth_id] = prediction_id
-            previous_matched[ground_truth_id] = True
             ever_matched.add(ground_truth_id)
-            matched_ids.add(ground_truth_id)
+            current_timestep_match[ground_truth_id] = prediction_id
 
-        for detection in frame.ground_truth:
-            if detection.track_id not in matched_ids:
-                previous_matched[detection.track_id] = False
+        if frame.ground_truth and frame.predictions:
+            previous_timestep_match = current_timestep_match
 
-        identity_ground_truth, identity_predictions = _match_similarities(
-            frame.similarities,
-            iou_threshold,
+        identity_ground_truth, identity_predictions = np.nonzero(
+            frame.similarities >= iou_threshold
         )
         for ground_truth_index, prediction_index in zip(
             identity_ground_truth,
@@ -524,11 +526,12 @@ def _calculate_hota(
                 ]
                 * similarities
             )
-            matched_ground_truth, matched_predictions = _match_similarities(
-                scores,
-                threshold,
-                threshold_values=similarities,
+            matched_ground_truth, matched_predictions = _maximize_assignment(scores)
+            valid = similarities[matched_ground_truth, matched_predictions] >= (
+                threshold - np.finfo(float).eps
             )
+            matched_ground_truth = matched_ground_truth[valid]
+            matched_predictions = matched_predictions[valid]
             match_count = len(matched_ground_truth)
             true_positives[threshold_index] += match_count
             false_negatives[threshold_index] += (
@@ -603,38 +606,29 @@ def _match_similarities(
     if scores.size == 0:
         return np.array([], dtype=int), np.array([], dtype=int)
     threshold_values = scores if threshold_values is None else threshold_values
-    eligible_scores = np.where(threshold_values >= threshold, scores, 0.0)
+    eligible = threshold_values >= (threshold - np.finfo(float).eps)
+    eligible_scores = np.where(eligible, scores, 0.0)
     rows, columns = _maximize_assignment(eligible_scores)
-    valid = threshold_values[rows, columns] >= threshold
+    valid = eligible[rows, columns]
     return rows[valid], columns[valid]
 
 
 def _maximize_assignment(scores: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     if scores.size == 0 or scores.shape[0] == 0 or scores.shape[1] == 0:
         return np.array([], dtype=int), np.array([], dtype=int)
-    _, assignment, _ = lap.lapjv(-scores, extend_cost=True)
-    rows = np.flatnonzero(assignment >= 0)
-    return rows, assignment[rows]
+    return linear_sum_assignment(-scores)
 
 
 def _iou_matrix(
     ground_truth: list[MotDetection],
     predictions: list[MotDetection],
 ) -> np.ndarray:
-    return _overlap_matrix(ground_truth, predictions, denominator="union")
-
-
-def _ioa_matrix(
-    ignored: list[MotDetection],
-    predictions: list[MotDetection],
-) -> np.ndarray:
-    return _overlap_matrix(ignored, predictions, denominator="prediction")
+    return _overlap_matrix(ground_truth, predictions)
 
 
 def _overlap_matrix(
     left: list[MotDetection],
     right: list[MotDetection],
-    denominator: str,
 ) -> np.ndarray:
     if not left or not right:
         return np.zeros((len(left), len(right)), dtype=float)
@@ -658,10 +652,7 @@ def _overlap_matrix(
     intersection = intersection_width * intersection_height
     left_area = left_boxes[:, 2] * left_boxes[:, 3]
     right_area = right_boxes[:, 2] * right_boxes[:, 3]
-    if denominator == "prediction":
-        area = right_area[None, :]
-    else:
-        area = left_area[:, None] + right_area[None, :] - intersection
+    area = left_area[:, None] + right_area[None, :] - intersection
     return np.divide(
         intersection,
         area,

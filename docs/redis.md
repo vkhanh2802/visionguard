@@ -71,9 +71,10 @@ rather than Redis.
 After Redis is healthy, start a dedicated worker in another terminal:
 
 ```powershell
-& "C:\Users\Khanh\miniconda3\envs\visionguard\python.exe" -m scripts.run_worker
+python -m scripts.run_worker
 ```
 
-On Windows the command uses RQ `SimpleWorker`, which does not depend on Unix process
-forking APIs. On other platforms it uses the standard RQ worker. Keep this terminal
-open while jobs are being processed.
+On Windows the command uses a heartbeat-enabled RQ `SimpleWorker`, which does not depend
+on Unix process forking APIs and keeps its registration current during long jobs. On other
+platforms it uses the standard RQ worker. Keep this terminal open while jobs are being
+processed.

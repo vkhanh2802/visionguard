@@ -46,9 +46,8 @@ class ApiSettings:
     def validate_analysis_paths(
         self,
         source_path: str,
-        output_path: str,
         config_path: str,
-    ) -> tuple[Path, Path, Path]:
+    ) -> tuple[Path, Path]:
         source = self._resolve_within_root(
             source_path,
             self.source_root,
@@ -56,10 +55,6 @@ class ApiSettings:
         )
         if not source.is_file():
             raise FileNotFoundError(f"Source video does not exist: {source}")
-
-        output = self.output_path(output_path)
-        if source == output:
-            raise ValueError("Input and output video paths must be different.")
 
         config = self._resolve_within_root(
             config_path,
@@ -69,7 +64,10 @@ class ApiSettings:
         if not config.is_file():
             raise FileNotFoundError(f"Configuration file does not exist: {config}")
 
-        return source, output, config
+        return source, config
+
+    def run_output_path(self, run_id: str) -> Path:
+        return self.output_path(self.output_root / run_id / "annotated.mp4")
 
     def output_path(self, output_path: str | Path) -> Path:
         return self._resolve_within_root(

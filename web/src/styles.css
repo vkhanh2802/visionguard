@@ -189,7 +189,7 @@ h3 {
 
 .analysis-form {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   align-items: end;
   gap: 12px;
 }
@@ -538,11 +538,11 @@ td {
   }
 
   .analysis-form {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .analysis-form button {
-    grid-column: span 3;
+    grid-column: span 2;
   }
 
   .run-list-panel {

@@ -11,7 +11,6 @@ import type {
 
 const defaultAnalysisRequest: AnalysisRequest = {
   source_path: "C:\\VisionGuard\\videos\\test.mp4",
-  output_path: "C:\\VisionGuard\\outputs\\dashboard-output.mp4",
   config_path: "C:\\VisionGuard\\configs\\default.yaml",
 };
 
@@ -51,9 +50,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [detailRefreshToken, setDetailRefreshToken] = useState(0);
   const [analysisRequest, setAnalysisRequest] = useState(defaultAnalysisRequest);
 
   const selectedRun = runs.find((run) => run.run_id === selectedRunId) ?? null;
+  const selectedRunStatus = selectedRun?.status ?? null;
 
   async function refreshRuns() {
     setIsRefreshing(true);
@@ -84,9 +85,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    setAnalytics(null);
+    setEvents([]);
     if (!selectedRunId) {
-      setAnalytics(null);
-      setEvents([]);
       return;
     }
 
@@ -107,7 +108,12 @@ export function App() {
     return () => {
       isCurrent = false;
     };
-  }, [selectedRunId]);
+  }, [selectedRunId, selectedRunStatus, detailRefreshToken]);
+
+  function refreshDashboard() {
+    setDetailRefreshToken((current) => current + 1);
+    void refreshRuns();
+  }
 
   useEffect(() => {
     if (!selectedRun || !["queued", "running"].includes(selectedRun.status)) {
@@ -119,7 +125,7 @@ export function App() {
     }, 5000);
 
     return () => window.clearInterval(intervalId);
-  }, [selectedRun]);
+  }, [selectedRunId, selectedRunStatus]);
 
   async function submitAnalysis(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -156,7 +162,7 @@ export function App() {
         <div className="analysis-panel-copy">
           <p className="eyebrow">NEW ANALYSIS</p>
           <h2>Turn a local video into a reviewable run.</h2>
-          <p>Runs are persisted in SQLite. Processing status updates automatically while this dashboard is open.</p>
+          <p>Runs and their isolated output artifacts are managed by the server. Processing status updates automatically while this dashboard is open.</p>
         </div>
         <form className="analysis-form" onSubmit={submitAnalysis}>
           <label>
@@ -164,14 +170,6 @@ export function App() {
             <input
               value={analysisRequest.source_path}
               onChange={(event) => setAnalysisRequest({ ...analysisRequest, source_path: event.target.value })}
-              required
-            />
-          </label>
-          <label>
-            Annotated output
-            <input
-              value={analysisRequest.output_path}
-              onChange={(event) => setAnalysisRequest({ ...analysisRequest, output_path: event.target.value })}
               required
             />
           </label>
@@ -196,7 +194,7 @@ export function App() {
               <p className="eyebrow">RECENT ACTIVITY</p>
               <h2>Analysis runs</h2>
             </div>
-            <button className="text-button" onClick={() => void refreshRuns()} disabled={isRefreshing}>
+            <button className="text-button" onClick={refreshDashboard} disabled={isRefreshing}>
               {isRefreshing ? "Refreshing" : "Refresh"}
             </button>
           </div>
@@ -346,6 +344,21 @@ export function App() {
                       <Metric label="Missing frames" value={formatNumber(analytics.tracking.total_missing_frames)} />
                       <Metric label="Median observed" value={formatDecimal(analytics.tracking.median_observed_frames)} />
                     </div>
+                    {analytics.tracking.timing && (
+                      <div className="continuity-summary">
+                        <p className="eyebrow">PIPELINE TIMING</p>
+                        <div className="diagnostic-grid continuity-grid">
+                          <Metric label="Read" value={formatSeconds(analytics.tracking.timing.read_seconds)} />
+                          <Metric label="Detect + track" value={formatSeconds(analytics.tracking.timing.tracking_seconds)} />
+                          <Metric label="Analytics" value={formatSeconds(analytics.tracking.timing.analytics_seconds)} />
+                          <Metric label="Drawing" value={formatSeconds(analytics.tracking.timing.drawing_seconds)} />
+                          <Metric label="Encode" value={formatSeconds(analytics.tracking.timing.encoding_seconds)} />
+                          <Metric label="Writer flush" value={formatSeconds(analytics.tracking.timing.writer_flush_seconds)} />
+                          <Metric label="Frame loop" value={formatSeconds(analytics.tracking.timing.frame_loop_seconds)} />
+                          <Metric label="Tracking FPS" value={analytics.tracking.timing.tracking_fps.toFixed(1)} />
+                        </div>
+                      </div>
+                    )}
                     <div className="event-table-wrap">
                       <table>
                         <thead>

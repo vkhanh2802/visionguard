@@ -1,8 +1,10 @@
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from redis.exceptions import RedisError
 
-from src.api.app import create_app
+from src.api.app import _ffmpeg_capabilities, create_app
 from src.api.settings import ApiSettings
 from src.database import SQLiteRepository
 from src.events import Event
@@ -43,6 +45,7 @@ def test_root_lists_api_entrypoints(tmp_path: Path):
         "service": "VisionGuard API",
         "docs_url": "/docs",
         "health_url": "/health",
+        "readiness_url": "/readiness",
         "runs_url": "/runs",
         "events_url": "/events",
     }
@@ -167,6 +170,17 @@ def test_returns_persisted_tracking_diagnostics(tmp_path: Path):
                 "max_gap_frames": 2,
                 "median_observed_frames": 10.0,
                 "track_lifetimes": [],
+                "timing": {
+                    "read_seconds": 1.0,
+                    "tracking_seconds": 2.0,
+                    "analytics_seconds": 0.5,
+                    "drawing_seconds": 0.25,
+                    "write_enqueue_seconds": 0.1,
+                    "encoding_seconds": 1.5,
+                    "writer_flush_seconds": 0.2,
+                    "frame_loop_seconds": 4.0,
+                    "tracking_fps": 50.0,
+                },
             },
         ),
     )
@@ -175,6 +189,153 @@ def test_returns_persisted_tracking_diagnostics(tmp_path: Path):
 
     assert response.status_code == 200
     assert response.json()["tracking"]["new_track_count_in_roi"] == 1
+    assert response.json()["tracking"]["timing"]["tracking_fps"] == 50.0
+
+
+def test_readiness_checks_job_processing_dependencies(tmp_path: Path, monkeypatch):
+    class ReadyConnection:
+        def ping(self):
+            return True
+
+    class ReadyQueue:
+        connection = ReadyConnection()
+
+    settings = ApiSettings(
+        source_root=tmp_path,
+        output_root=tmp_path / "outputs",
+        config_root=tmp_path,
+    )
+    class ReadyWorker:
+        last_heartbeat = datetime.now(timezone.utc)
+
+        def get_state(self):
+            return "idle"
+
+    monkeypatch.setattr("src.api.app.Worker.all", lambda **kwargs: [ReadyWorker()])
+    monkeypatch.setattr("src.api.app._ffmpeg_capabilities", lambda: (True, True))
+    response = TestClient(
+        create_app(tmp_path / "visionguard.db", settings, ReadyQueue())
+    ).get("/readiness")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "ready",
+        "database_writable": True,
+        "redis_connected": True,
+        "worker_available": True,
+        "output_writable": True,
+        "ffmpeg_available": True,
+        "nvenc_available": True,
+    }
+
+
+def test_readiness_reports_optional_encoder_capabilities(tmp_path: Path, monkeypatch):
+    class ReadyConnection:
+        def ping(self):
+            return True
+
+    class ReadyQueue:
+        connection = ReadyConnection()
+
+    class ReadyWorker:
+        last_heartbeat = datetime.now(timezone.utc)
+
+        def get_state(self):
+            return "busy"
+
+    settings = ApiSettings(
+        source_root=tmp_path,
+        output_root=tmp_path / "outputs",
+        config_root=tmp_path,
+    )
+    monkeypatch.setattr("src.api.app.Worker.all", lambda **kwargs: [ReadyWorker()])
+    monkeypatch.setattr("src.api.app._ffmpeg_capabilities", lambda: (False, False))
+
+    response = TestClient(
+        create_app(tmp_path / "visionguard.db", settings, ReadyQueue())
+    ).get("/readiness")
+
+    assert response.status_code == 200
+    assert response.json()["ffmpeg_available"] is False
+    assert response.json()["nvenc_available"] is False
+
+
+def test_readiness_rejects_worker_without_live_state(tmp_path: Path, monkeypatch):
+    class ReadyConnection:
+        def ping(self):
+            return True
+
+    class ReadyQueue:
+        connection = ReadyConnection()
+
+    class StaleWorker:
+        last_heartbeat = datetime.now(timezone.utc) - timedelta(minutes=5)
+        job_monitoring_interval = 30
+
+        def get_state(self):
+            return "busy"
+
+    settings = ApiSettings(
+        source_root=tmp_path,
+        output_root=tmp_path / "outputs",
+        config_root=tmp_path,
+    )
+    monkeypatch.setattr("src.api.app.Worker.all", lambda **kwargs: [StaleWorker()])
+    monkeypatch.setattr("src.api.app._ffmpeg_capabilities", lambda: (True, True))
+
+    response = TestClient(
+        create_app(tmp_path / "visionguard.db", settings, ReadyQueue())
+    ).get("/readiness")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["worker_available"] is False
+
+
+def test_readiness_returns_503_when_redis_is_unavailable(tmp_path: Path, monkeypatch):
+    class FailedConnection:
+        def ping(self):
+            raise RedisError("unavailable")
+
+    class FailedQueue:
+        connection = FailedConnection()
+
+    settings = ApiSettings(
+        source_root=tmp_path,
+        output_root=tmp_path / "outputs",
+        config_root=tmp_path,
+    )
+    monkeypatch.setattr("src.api.app._ffmpeg_capabilities", lambda: (True, True))
+    response = TestClient(
+        create_app(tmp_path / "visionguard.db", settings, FailedQueue())
+    ).get("/readiness")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["redis_connected"] is False
+    assert response.json()["detail"]["worker_available"] is False
+
+
+def test_ffmpeg_capabilities_probe_nvenc_runtime(monkeypatch):
+    class EncoderResult:
+        stdout = " V....D h264_nvenc NVIDIA NVENC H.264 encoder"
+
+    class FailedProbeResult:
+        returncode = 1
+
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return EncoderResult() if len(calls) == 1 else FailedProbeResult()
+
+    monkeypatch.setattr("src.api.app.shutil.which", lambda executable: "ffmpeg")
+    monkeypatch.setattr("src.api.app.subprocess.run", fake_run)
+    _ffmpeg_capabilities.cache_clear()
+    try:
+        assert _ffmpeg_capabilities() == (True, False)
+        assert len(calls) == 2
+        assert "color=size=320x180:rate=1" in calls[1]
+    finally:
+        _ffmpeg_capabilities.cache_clear()
 
 
 def test_filters_events(tmp_path: Path):
@@ -196,6 +357,13 @@ def test_rejects_invalid_pagination(tmp_path: Path):
 
 def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
     database_path = tmp_path / "visionguard.db"
+    source_root = tmp_path / "videos"
+    output_root = tmp_path / "outputs"
+    config_root = Path(__file__).resolve().parents[1] / "configs"
+    source_root.mkdir()
+    output_root.mkdir()
+    source_path = source_root / "test.mp4"
+    source_path.write_bytes(b"")
     captured = {}
 
     class RecordingQueue:
@@ -204,13 +372,18 @@ def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
             captured["args"] = args
             captured["kwargs"] = kwargs
 
-    client = TestClient(create_app(database_path, queue=RecordingQueue()))
+    settings = ApiSettings(
+        source_root=source_root,
+        output_root=output_root,
+        config_root=config_root,
+    )
+    client = TestClient(create_app(database_path, settings, RecordingQueue()))
 
     response = client.post(
         "/analyze",
         json={
-            "source_path": "C:/VisionGuard/videos/test.mp4",
-            "output_path": "C:/VisionGuard/outputs/api-output.mp4",
+            "source_path": str(source_path),
+            "config_path": str(config_root / "default.yaml"),
         },
     )
 
@@ -218,12 +391,14 @@ def test_accepts_analysis_job(tmp_path: Path, monkeypatch):
     body = response.json()
     assert body["status"] == "queued"
     assert captured["args"][0] == body["run_id"]
-    assert captured["args"][2] == str(Path("C:/VisionGuard/videos/test.mp4").resolve())
+    assert captured["args"][2] == str(source_path.resolve())
     assert captured["args"][3] == str(
-        Path("C:/VisionGuard/outputs/api-output.mp4").resolve()
+        (output_root / body["run_id"] / "annotated.mp4").resolve()
     )
     assert captured["kwargs"]["job_id"] == body["run_id"]
-    assert SQLiteRepository(database_path).get_run(body["run_id"])["status"] == "queued"
+    run = SQLiteRepository(database_path).get_run(body["run_id"])
+    assert run["status"] == "queued"
+    assert run["output_path"] == captured["args"][3]
 
 
 def test_scopes_analysis_artifacts_to_run_id(tmp_path: Path):
@@ -273,7 +448,7 @@ logging:
 
     class RecordingQueue:
         def enqueue(self, function, *args, **kwargs):
-            captured["args"] = args
+            captured.setdefault("calls", []).append(args)
 
     settings = ApiSettings(
         source_root=source_root,
@@ -286,16 +461,81 @@ logging:
         "/analyze",
         json={
             "source_path": str(source_root / "test.mp4"),
-            "output_path": str(output_root / "output.mp4"),
             "config_path": str(config_path),
         },
     )
 
     run_id = response.json()["run_id"]
-    logging_config = captured["args"][1]["logging"]
+    first_call = captured["calls"][0]
+    logging_config = first_call[1]["logging"]
     assert response.status_code == 202
-    assert logging_config["event_jsonl_path"].endswith(f"events.{run_id}.jsonl")
-    assert logging_config["run_metadata_path"].endswith(f"metadata.{run_id}.json")
+    assert Path(first_call[3]) == output_root / run_id / "annotated.mp4"
+    assert Path(logging_config["event_jsonl_path"]) == output_root / run_id / "events.jsonl"
+    assert Path(logging_config["run_metadata_path"]) == output_root / run_id / "metadata.json"
+
+    second_response = TestClient(
+        create_app(tmp_path / "visionguard.db", settings, RecordingQueue())
+    ).post(
+        "/analyze",
+        json={
+            "source_path": str(source_root / "test.mp4"),
+            "config_path": str(config_path),
+        },
+    )
+    second_run_id = second_response.json()["run_id"]
+    second_call = captured["calls"][1]
+    assert Path(second_call[3]) == output_root / second_run_id / "annotated.mp4"
+    assert first_call[3] != second_call[3]
+
+
+def test_rejects_colliding_analysis_artifact_names(tmp_path: Path):
+    source_root = tmp_path / "videos"
+    output_root = tmp_path / "outputs"
+    config_root = tmp_path / "configs"
+    source_root.mkdir()
+    output_root.mkdir()
+    config_root.mkdir()
+    source_path = source_root / "test.mp4"
+    source_path.write_bytes(b"")
+    config_path = config_root / "config.yaml"
+    default_config = (
+        Path(__file__).resolve().parents[1] / "configs" / "default.yaml"
+    ).read_text(encoding="utf-8")
+    config_path.write_text(
+        default_config.replace(
+            "event_jsonl_path: null\n  run_metadata_path: null",
+            "event_jsonl_path: artifacts/events.jsonl\n"
+            "  run_metadata_path: artifacts/EVENTS.JSONL",
+        ),
+        encoding="utf-8",
+    )
+    settings = ApiSettings(
+        source_root=source_root,
+        output_root=output_root,
+        config_root=config_root,
+    )
+
+    response = TestClient(create_app(tmp_path / "visionguard.db", settings)).post(
+        "/analyze",
+        json={"source_path": str(source_path), "config_path": str(config_path)},
+    )
+
+    assert response.status_code == 422
+    assert "names must be unique" in response.json()["detail"]
+
+
+def test_rejects_client_supplied_analysis_output_path(tmp_path: Path):
+    response = TestClient(create_app(tmp_path / "visionguard.db")).post(
+        "/analyze",
+        json={
+            "source_path": "input.mp4",
+            "config_path": "configs/default.yaml",
+            "output_path": "shared.mp4",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["type"] == "extra_forbidden"
 
 
 def test_rejects_missing_analysis_config(tmp_path: Path):
@@ -303,7 +543,6 @@ def test_rejects_missing_analysis_config(tmp_path: Path):
         "/analyze",
         json={
             "source_path": "input.mp4",
-            "output_path": "output.mp4",
             "config_path": "configs/missing.yaml",
         },
     )
@@ -327,7 +566,6 @@ def test_rejects_analysis_paths_outside_configured_roots(tmp_path: Path):
         "/analyze",
         json={
             "source_path": str(tmp_path / "outside.mp4"),
-            "output_path": str(output_root / "output.mp4"),
         },
     )
 

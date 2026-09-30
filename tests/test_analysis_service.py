@@ -107,8 +107,22 @@ def test_scopes_event_artifacts_to_run_id(tmp_path: Path):
     }
     config = AppConfig.model_validate(config_data)
 
-    scoped = scope_artifact_paths_for_run(config, "run-1")
+    artifact_dir = tmp_path / "run-1"
+    scoped = scope_artifact_paths_for_run(config, artifact_dir)
 
     assert config.logging.event_jsonl_path == tmp_path / "events.jsonl"
-    assert scoped.logging.event_jsonl_path == tmp_path / "events.run-1.jsonl"
-    assert scoped.logging.run_metadata_path == tmp_path / "metadata.run-1.json"
+    assert scoped.logging.event_jsonl_path == artifact_dir / "events.jsonl"
+    assert scoped.logging.run_metadata_path == artifact_dir / "metadata.json"
+
+
+def test_rejects_windows_alternate_data_stream_artifact_name(tmp_path: Path):
+    config_data = load_test_config().model_dump(mode="python")
+    config_data["logging"] = {
+        "level": "INFO",
+        "event_jsonl_path": tmp_path / "annotated.mp4::$DATA",
+        "run_metadata_path": tmp_path / "metadata.json",
+    }
+    config = AppConfig.model_validate(config_data)
+
+    with pytest.raises(ValueError, match="valid Windows filenames"):
+        scope_artifact_paths_for_run(config, tmp_path / "run-1")

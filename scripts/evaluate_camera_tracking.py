@@ -1,13 +1,41 @@
 import argparse
+import hashlib
 import json
+import platform
+import subprocess
+import sys
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from time import perf_counter
+from uuid import uuid4
 
 import cv2
+import torch
+import ultralytics
 
 from src.config import load_config
 from src.evaluation import evaluate_mot_files, format_mot_prediction
 from src.tracking import YOLOByteTracker
+
+
+TRACKEVAL_COMMIT = "12c8791b303e0a0b50f753af204249e622d0281a"
+
+
+def resolve_tracker_config(tracker_config: Path | None) -> Path:
+    if tracker_config is not None:
+        return Path(tracker_config)
+    default_config = (
+        Path(ultralytics.__file__).resolve().parent
+        / "cfg"
+        / "trackers"
+        / "bytetrack.yaml"
+    )
+    if not default_config.is_file():
+        raise FileNotFoundError(
+            f"Ultralytics default ByteTrack config not found: {default_config}"
+        )
+    return default_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,29 +98,44 @@ def run_tracking(
         raise RuntimeError(f"Could not open video: {video_path}")
 
     prediction_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_prediction_path = prediction_path.with_name(
+        f".{prediction_path.name}.{uuid4().hex}.tmp"
+    )
     frame_id = 0
     prediction_count = 0
     started_at = perf_counter()
     inference_seconds = 0.0
-    with prediction_path.open("w", encoding="utf-8", newline="") as output:
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            frame_id += 1
-            inference_started_at = perf_counter()
-            tracks = tracker.track(frame)
-            inference_seconds += perf_counter() - inference_started_at
-            prediction_count += len(tracks)
-            output.writelines(format_mot_prediction(frame_id, track) for track in tracks)
-    capture.release()
+    try:
+        with temporary_prediction_path.open(
+            "w", encoding="utf-8", newline=""
+        ) as output:
+            while True:
+                ok, frame = capture.read()
+                if not ok:
+                    break
+                frame_id += 1
+                inference_started_at = perf_counter()
+                tracks = tracker.track(frame)
+                inference_seconds += perf_counter() - inference_started_at
+                prediction_count += len(tracks)
+                output.writelines(
+                    format_mot_prediction(frame_id, track) for track in tracks
+                )
+        if frame_id == 0:
+            raise RuntimeError(f"Video contains no readable frames: {video_path}")
+        temporary_prediction_path.replace(prediction_path)
+    finally:
+        capture.release()
+        temporary_prediction_path.unlink(missing_ok=True)
     elapsed_seconds = perf_counter() - started_at
     return {
         "frames": frame_id,
         "predictions": prediction_count,
         "elapsed_seconds": round(elapsed_seconds, 3),
         "end_to_end_fps": round(frame_id / elapsed_seconds, 3),
-        "inference_fps": round(frame_id / inference_seconds, 3),
+        "inference_fps": round(frame_id / inference_seconds, 3)
+        if inference_seconds > 0
+        else 0.0,
     }
 
 
@@ -109,6 +152,104 @@ def select_best_runs(runs: list[dict[str, object]]) -> dict[str, dict[str, objec
         ):
             best[model] = run
     return best
+
+
+def describe_artifact(path: str | Path) -> dict[str, object]:
+    artifact_path = Path(path)
+    if not artifact_path.is_file():
+        raise FileNotFoundError(f"Benchmark artifact not found: {artifact_path}")
+    digest = hashlib.sha256()
+    with artifact_path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {
+        "path": str(artifact_path),
+        "size_bytes": artifact_path.stat().st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
+def _package_version(package: str) -> str | None:
+    try:
+        return version(package)
+    except PackageNotFoundError:
+        return None
+
+
+def _git_metadata(project_root: Path) -> dict[str, object]:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {"commit": commit, "dirty": bool(status.strip())}
+
+
+def collect_reproducibility_metadata(
+    args: argparse.Namespace,
+    tracker_config: Path | None,
+    run_specs: list[tuple[str, str, float]],
+) -> dict[str, object]:
+    project_root = Path(__file__).resolve().parents[1]
+    models = {
+        model_label: describe_artifact(model_path)
+        for model_label, model_path, _ in run_specs
+    }
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else None
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "command": [sys.executable, *sys.argv],
+        "source_control": _git_metadata(project_root),
+        "platform": {
+            "operating_system": platform.platform(),
+            "python": platform.python_version(),
+            "packages": {
+                package: _package_version(package)
+                for package in (
+                    "ultralytics",
+                    "opencv-python",
+                    "torch",
+                    "lap",
+                    "scipy",
+                )
+            },
+            "cuda_available": torch.cuda.is_available(),
+            "cuda_version": torch.version.cuda,
+            "gpu": gpu_name,
+        },
+        "artifacts": {
+            "video": describe_artifact(args.video),
+            "ground_truth": describe_artifact(args.ground_truth),
+            "config": describe_artifact(args.config),
+            "tracker_config": (
+                describe_artifact(tracker_config)
+                if tracker_config is not None
+                else None
+            ),
+            "models": models,
+            "tracking_implementation": describe_artifact(
+                project_root / "src/tracking/yolo_bytetrack.py"
+            ),
+        },
+        "evaluator": {
+            "implementation": describe_artifact(project_root / "src/evaluation/mot.py"),
+            "benchmark_script": describe_artifact(Path(__file__)),
+            "validation_reference": {
+                "repository": "https://github.com/JonathonLuiten/TrackEval",
+                "commit": TRACKEVAL_COMMIT,
+            },
+            "validation_command": "scripts/validate_mot_evaluator.py",
+        },
+    }
 
 
 def build_run_specs(
@@ -163,6 +304,19 @@ def write_report(output_dir: Path, report: dict[str, object]) -> None:
             f"{run['recall']:.3f} | {run['id_switches']} | "
             f"{run['end_to_end_fps']:.3f} |\n"
         )
+    reproducibility = report["reproducibility"]
+    rows.extend(
+        [
+            "\n## Reproducibility\n",
+            f"- Generated: `{reproducibility['generated_at_utc']}`\n",
+            f"- Git commit: `{reproducibility['source_control']['commit']}` "
+            f"(dirty: `{str(reproducibility['source_control']['dirty']).lower()}`)\n",
+            f"- Python: `{reproducibility['platform']['python']}`\n",
+            f"- GPU: `{reproducibility['platform']['gpu']}`\n",
+            "- TrackEval reference: "
+            f"`{reproducibility['evaluator']['validation_reference']['commit']}`\n",
+        ]
+    )
     (output_dir / "report.md").write_text("".join(rows), encoding="utf-8")
 
 
@@ -191,6 +345,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(args.config)
+    tracker_config = resolve_tracker_config(config.tracking.tracker_config)
     evaluation_mode, run_specs = build_run_specs(
         baseline_model=args.baseline_model,
         candidate_model=args.candidate_model,
@@ -210,7 +365,7 @@ def main() -> None:
             model_path=model_path,
             confidence=confidence,
             target_classes=config.detection.target_classes,
-            tracker_config=config.tracking.tracker_config,
+            tracker_config=tracker_config,
         )
         metrics = evaluate_mot_files(
             ground_truth_path,
@@ -222,6 +377,7 @@ def main() -> None:
             "model_path": model_path,
             "confidence": confidence,
             "prediction_path": str(prediction_path),
+            "prediction_artifact": describe_artifact(prediction_path),
             **runtime,
             **metrics,
         }
@@ -235,10 +391,15 @@ def main() -> None:
         "video": str(video_path),
         "ground_truth": str(ground_truth_path),
         "config": str(args.config),
-        "tracker_config": str(config.tracking.tracker_config),
+        "tracker_config": str(tracker_config),
         "iou_threshold": args.iou_threshold,
         "evaluation_mode": evaluation_mode,
         "ground_truth_available": True,
+        "reproducibility": collect_reproducibility_metadata(
+            args,
+            tracker_config,
+            run_specs,
+        ),
         "runs": runs,
         "best_by_model": select_best_runs(runs),
     }

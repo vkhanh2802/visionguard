@@ -106,6 +106,79 @@ def test_counts_identity_switch(tmp_path: Path):
     assert metrics["idf1"] == 50.0
 
 
+def test_identity_matching_uses_all_eligible_pairs_across_sequence(tmp_path: Path):
+    ground_truth = write_mot_file(
+        tmp_path / "gt.txt",
+        [
+            "1,1,0,0,10,10,1,1,1",
+            "1,2,2,0,10,10,1,1,1",
+            "2,1,0,0,10,10,1,1,1",
+            "2,2,2,0,10,10,1,1,1",
+        ],
+    )
+    predictions = write_mot_file(
+        tmp_path / "predictions.txt",
+        [
+            "1,10,0,0,10,10,0.9,-1,-1,-1",
+            "1,20,2,0,10,10,0.9,-1,-1,-1",
+            "2,10,2,0,10,10,0.9,-1,-1,-1",
+            "2,20,0,0,10,10,0.9,-1,-1,-1",
+        ],
+    )
+
+    metrics = evaluate_mot_files(ground_truth, predictions).metrics()
+
+    assert metrics["idf1"] == 100.0
+
+
+def test_identity_switch_after_unmatched_frame_uses_previous_timestep(tmp_path: Path):
+    ground_truth = write_mot_file(
+        tmp_path / "gt.txt",
+        [
+            "1,1,0,0,10,10,1,1,1",
+            "2,1,0,0,10,10,1,1,1",
+            "3,1,0,0,10,10,1,1,1",
+        ],
+    )
+    predictions = write_mot_file(
+        tmp_path / "predictions.txt",
+        [
+            "1,10,0,0,10,10,0.9,-1,-1,-1",
+            "2,99,100,0,10,10,0.9,-1,-1,-1",
+            "3,10,2,0,10,10,0.9,-1,-1,-1",
+            "3,20,0,0,10,10,0.9,-1,-1,-1",
+        ],
+    )
+
+    metrics = evaluate_mot_files(ground_truth, predictions).metrics()
+
+    assert metrics["id_switches"] == 1
+    assert metrics["fragmentations"] == 1
+
+
+def test_fragmentation_counts_track_reappearing_after_other_tracks(tmp_path: Path):
+    ground_truth = write_mot_file(
+        tmp_path / "gt.txt",
+        [
+            "1,1,0,0,10,10,1,1,1",
+            "2,2,20,0,10,10,1,1,1",
+            "3,1,0,0,10,10,1,1,1",
+        ],
+    )
+    predictions = write_mot_file(
+        tmp_path / "predictions.txt",
+        [
+            "1,10,0,0,10,10,0.9,-1,-1,-1",
+            "2,20,20,0,10,10,0.9,-1,-1,-1",
+            "3,10,0,0,10,10,0.9,-1,-1,-1",
+        ],
+    )
+
+    metrics = evaluate_mot_files(ground_truth, predictions).metrics()
+
+    assert metrics["fragmentations"] == 1
+
+
 def test_ignores_prediction_on_distractor(tmp_path: Path):
     ground_truth = write_mot_file(
         tmp_path / "gt.txt",
@@ -122,6 +195,51 @@ def test_ignores_prediction_on_distractor(tmp_path: Path):
     assert metrics["ground_truth_detections"] == 0
     assert metrics["predicted_detections"] == 0
     assert metrics["false_positives"] == 0
+
+
+def test_distractor_preprocessing_matches_trackeval_tie_breaking():
+    fixture_dir = Path(__file__).parent / "fixtures" / "mot_assignment_tie"
+
+    metrics = evaluate_mot_files(
+        fixture_dir / "gt.txt",
+        fixture_dir / "predictions.txt",
+    ).metrics()
+
+    assert metrics["predicted_detections"] == 2
+    assert metrics["id_switches"] == 0
+    assert metrics["idf1"] == 100.0
+
+
+def test_does_not_ignore_small_prediction_contained_by_large_distractor(tmp_path: Path):
+    ground_truth = write_mot_file(
+        tmp_path / "gt.txt",
+        ["1,1,0,0,100,100,1,7,1"],
+    )
+    predictions = write_mot_file(
+        tmp_path / "predictions.txt",
+        ["1,5,0,0,10,10,0.9,-1,-1,-1"],
+    )
+
+    metrics = evaluate_mot_files(ground_truth, predictions).metrics()
+
+    assert metrics["predicted_detections"] == 1
+    assert metrics["false_positives"] == 1
+
+
+def test_hota_localization_is_full_when_there_are_no_matches(tmp_path: Path):
+    ground_truth = write_mot_file(
+        tmp_path / "gt.txt",
+        ["1,1,0,0,10,10,1,1,1"],
+    )
+    predictions = write_mot_file(
+        tmp_path / "predictions.txt",
+        ["1,5,100,100,10,10,0.9,-1,-1,-1"],
+    )
+
+    metrics = evaluate_mot_files(ground_truth, predictions).metrics()
+
+    assert metrics["hota"] == 0.0
+    assert metrics["loca"] == 100.0
 
 
 def test_combines_sequence_counts(tmp_path: Path):

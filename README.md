@@ -1,8 +1,100 @@
 # VisionGuard
 
-VisionGuard is a real-time video analytics project for object detection, multi-object tracking, and event understanding.
+VisionGuard is an end-to-end video analytics prototype for person detection,
+multi-object tracking, event understanding, and reviewable analysis runs. It combines
+YOLO and ByteTrack with FastAPI, Redis/RQ, SQLite, and a React dashboard.
 
-## Current Status
+## Problem
+
+Security video becomes useful only when detections can be associated over time, converted
+into explainable events, processed outside the request lifecycle, and reviewed with the
+correct output artifact. VisionGuard implements that complete path rather than stopping at
+a model notebook.
+
+## Portfolio Snapshot
+
+| Area | Implementation |
+| --- | --- |
+| Vision | YOLO26 person detection, ByteTrack, trajectories, configurable confidence |
+| Events | Line crossing, intrusion, loitering, continuity and duplicate diagnostics |
+| Service | FastAPI, Redis/RQ worker, SQLite lifecycle and event persistence |
+| UI | React/TypeScript run submission, polling, analytics, diagnostics, downloads |
+| Reliability | Per-run artifacts, readiness checks, bounded async encoding, failure propagation |
+| Evaluation | Custom MOT evaluator locally validated against TrackEval on eight camera prediction files |
+| Performance | Stage timing, async writer, FFmpeg H.264 NVENC, controlled throughput comparisons |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI[React dashboard] --> API[FastAPI]
+    API --> DB[(SQLite)]
+    API --> Q[(Redis queue)]
+    Q --> W[RQ worker]
+    W --> P[VideoPipeline]
+    P --> CV[YOLO + ByteTrack]
+    CV --> E[Event engines]
+    E --> DB
+    P --> A[Per-run video and JSON artifacts]
+    DB --> UI
+    A --> UI
+```
+
+Each API run owns `outputs/<run_id>/annotated.mp4`; optional JSONL and metadata files
+are placed in the same directory. The client cannot choose a shared output filename.
+See [architecture](docs/architecture.md) for module boundaries and runtime flow.
+
+## Verified Evaluation
+
+Camera 1 was used for confidence calibration. Camera 3 was evaluated once with the
+confidence selected on camera 1. Both sequences have frame-level CVAT/MOT annotations.
+
+| Sequence | Model | Confidence | HOTA | MOTA | IDF1 | Precision | Recall | IDSW |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Camera 1 calibration | Pretrained YOLO26n | 0.30 | **40.905** | **38.789** | **49.548** | **94.021** | 41.782 | **78** |
+| Camera 1 calibration | MOT17 fine-tuned | 0.40 | 30.526 | 12.212 | 34.666 | 61.638 | 34.573 | 196 |
+| Camera 3 locked holdout | Pretrained YOLO26n | 0.30 | **57.349** | **63.790** | **77.504** | **95.304** | 67.240 | **15** |
+| Camera 3 locked holdout | MOT17 fine-tuned | 0.40 | 54.872 | 54.114 | 73.444 | 71.886 | **90.051** | 79 |
+
+Local validation shows that the evaluator matches TrackEval commit
+`12c8791b303e0a0b50f753af204249e622d0281a` for HOTA, DetA, AssA, LocA, MOTA,
+MOTP, IDF1, TP, FP, FN, ID switches, and fragmentations on all eight regenerated
+prediction files. Reports store checkpoint/config/input SHA-256 hashes and environment
+metadata. The older MOT17 tables in [the experiment log](docs/mot17_baseline.md) are
+historical until the removed MOT17 ground truth is restored and those results are rerun.
+The sanitized [evaluation evidence manifest](docs/evaluation_evidence.md) records the
+camera metrics, prediction hashes, artifact hashes, and validation scope without bundling
+private media or model weights.
+
+## Performance
+
+Controlled tests on an NVIDIA GeForce RTX 3050 6 GB Laptop GPU measured:
+
+| Input | Sync OpenCV | Async OpenCV | Async NVENC |
+| --- | ---: | ---: | ---: |
+| 1080p, 25 FPS | 9.423 FPS | 14.435 FPS | **27.752 FPS** |
+| 4K, 30 FPS | 5.042 FPS | 10.097 FPS | **16.853 FPS** |
+
+These are selected controlled runs, not a claim of stable real-time throughput for every
+scene. End-to-end speed varies with resolution, scene density, thermal state, and concurrent
+GPU load. The API exposes per-stage timing to make that variation inspectable.
+
+## Limitations
+
+- The API accepts trusted local paths; it has no authentication or upload/storage boundary.
+- Camera 2, the most complex station scene, does not have tracking ground truth.
+- Line and ROI geometry remain camera-specific and use image coordinates.
+- `ffmpeg_nvenc` fails safely but does not automatically fall back to CPU/OpenCV encoding.
+- Model weights, videos, generated reports, and datasets are intentionally not bundled.
+- Redis/RQ transport requires an external Redis service; `/readiness` reports when it or a
+  worker is unavailable.
+- This is a portfolio prototype with defensible evaluation evidence, not a production-ready
+  surveillance product.
+
+See the [one-page case study](docs/case_study.md) and
+[90-second demo recording guide](docs/demo_script.md).
+
+## Development History
 
 Week 1 completed:
 
@@ -178,6 +270,7 @@ Open `http://127.0.0.1:8000/docs` for Swagger UI. The root endpoint at
 | Method | Path | Purpose |
 | ------ | ---- | ------- |
 | `GET` | `/health` | Verify SQLite availability. |
+| `GET` | `/readiness` | Verify database writes, Redis, a live worker, and output storage; report FFmpeg/NVENC capabilities. |
 | `GET` | `/runs` | List persisted video-analysis runs. |
 | `GET` | `/runs/{run_id}` | Get one run and its lifecycle status. |
 | `GET` | `/runs/{run_id}/analytics` | Get counters and event aggregates. |
@@ -192,10 +285,12 @@ runs inference, changing the status to `running`, then `completed` or `failed`. 
 ```json
 {
   "source_path": "C:/VisionGuard/videos/test.mp4",
-  "output_path": "C:/VisionGuard/outputs/api-output.mp4",
   "config_path": "C:/VisionGuard/configs/default.yaml"
 }
 ```
+
+The server creates `C:/VisionGuard/outputs/<run_id>/annotated.mp4` and persists that
+resolved path with the run.
 
 See [API guide](docs/api.md) for request examples, lifecycle behavior, and error codes.
 
@@ -217,8 +312,9 @@ The dashboard provides a form to start analysis jobs, a selectable run list, aut
 polling for active runs, run analytics, event records, error visibility, and completed
 annotated-video download.
 
-For safety, API analysis requests must stay inside `C:\VisionGuard\videos`,
-`C:\VisionGuard\outputs`, and `C:\VisionGuard\configs` by default. See
+For safety, requested source/config paths must stay inside `C:\VisionGuard\videos` and
+`C:\VisionGuard\configs`; server-owned artifacts stay inside `C:\VisionGuard\outputs`.
+See
 [API guide](docs/api.md) for environment variables that change these local roots or
 dashboard CORS origins.
 
@@ -239,7 +335,7 @@ commands and queue architecture.
 Start the RQ worker in another terminal before submitting dashboard analysis jobs:
 
 ```powershell
-& "C:\Users\Khanh\miniconda3\envs\visionguard\python.exe" -m scripts.run_worker
+python -m scripts.run_worker
 ```
 
 ## CLI Overrides
@@ -271,9 +367,10 @@ event_jsonl_path
 run_metadata_path
 ```
 
-When enabled, JSONL shares the same `run_id` as SQLite. `events.jsonl` contains one
-record per emitted event; `metadata.json` stores the resolved configuration and final
-run summary.
+When enabled, JSONL shares the same `run_id` as SQLite. API runs place `events.jsonl`,
+`metadata.json`, and `annotated.mp4` together under the run directory. `events.jsonl`
+contains one record per emitted event; `metadata.json` stores the resolved configuration
+and final run summary.
 
 ```json
 {

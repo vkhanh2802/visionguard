@@ -57,22 +57,49 @@ def create_analysis_job(
     )
 
 
-def scope_artifact_paths_for_run(config: AppConfig, run_id: str) -> AppConfig:
-    """Give optional JSON artifacts distinct filenames for a queued API run."""
+def scope_artifact_paths_for_run(config: AppConfig, artifact_dir: Path) -> AppConfig:
+    """Place optional JSON artifacts beside the queued run's output video."""
     if config.logging.event_jsonl_path is None:
         return config
 
+    artifact_names = {
+        _windows_filename_key("annotated.mp4"),
+        _windows_filename_key(config.logging.event_jsonl_path.name),
+        _windows_filename_key(config.logging.run_metadata_path.name),
+    }
+    if len(artifact_names) != 3:
+        raise ValueError("Output video, event log, and run metadata names must be unique.")
+
     config_data = config.model_dump(mode="python")
     logging_config = config_data["logging"]
-    logging_config["event_jsonl_path"] = _append_run_id(
-        config.logging.event_jsonl_path,
-        run_id,
-    )
-    logging_config["run_metadata_path"] = _append_run_id(
-        config.logging.run_metadata_path,
-        run_id,
-    )
+    logging_config["event_jsonl_path"] = artifact_dir / Path(
+        config.logging.event_jsonl_path
+    ).name
+    logging_config["run_metadata_path"] = artifact_dir / Path(
+        config.logging.run_metadata_path
+    ).name
     return AppConfig.model_validate(config_data)
+
+
+def _windows_filename_key(name: str) -> str:
+    normalized = name.rstrip(" .")
+    invalid_characters = '<>:"/\\|?*'
+    if normalized != name or not normalized or any(
+        character in invalid_characters or ord(character) < 32
+        for character in normalized
+    ):
+        raise ValueError("Artifact names must be valid Windows filenames.")
+    reserved_names = {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{index}" for index in range(1, 10)),
+        *(f"lpt{index}" for index in range(1, 10)),
+    }
+    if normalized.split(".", maxsplit=1)[0].casefold() in reserved_names:
+        raise ValueError("Artifact names must be valid Windows filenames.")
+    return normalized.casefold()
 
 
 def execute_analysis_job(job: AnalysisJob) -> PipelineResult:
@@ -118,10 +145,6 @@ def _create_event_writer(
         metadata_path=config.logging.run_metadata_path,
         run_id=run_id,
     )
-
-
-def _append_run_id(path: Path, run_id: str) -> Path:
-    return path.with_name(f"{path.stem}.{run_id}{path.suffix}")
 
 
 def _record_event(
