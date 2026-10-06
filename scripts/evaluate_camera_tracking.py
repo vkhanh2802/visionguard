@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import json
 import platform
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -58,6 +59,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--candidate-model",
         default="runs/person_detection/mot17_a/weights/best.pt",
+    )
+    parser.add_argument(
+        "--candidate-label",
+        default="mot17_a",
+        help="Label used for the candidate in reports and prediction file names",
     )
     parser.add_argument(
         "--confidences",
@@ -258,7 +264,15 @@ def build_run_specs(
     confidences: list[float],
     baseline_confidence: float | None,
     candidate_confidence: float | None,
+    candidate_label: str = "mot17_a",
 ) -> tuple[str, list[tuple[str, str, float]]]:
+    if (
+        candidate_label == "baseline"
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", candidate_label) is None
+    ):
+        raise ValueError(
+            "--candidate-label must be a file-safe label other than 'baseline'"
+        )
     if (baseline_confidence is None) != (candidate_confidence is None):
         raise ValueError(
             "--baseline-confidence and --candidate-confidence must be used together"
@@ -268,7 +282,7 @@ def build_run_specs(
             "locked_holdout",
             [
                 ("baseline", baseline_model, baseline_confidence),
-                ("mot17_a", candidate_model, candidate_confidence),
+                (candidate_label, candidate_model, candidate_confidence),
             ],
         )
     return (
@@ -277,7 +291,7 @@ def build_run_specs(
             (model_label, model_path, confidence)
             for model_label, model_path in (
                 ("baseline", baseline_model),
-                ("mot17_a", candidate_model),
+                (candidate_label, candidate_model),
             )
             for confidence in confidences
         ],
@@ -352,6 +366,7 @@ def main() -> None:
         confidences=args.confidences,
         baseline_confidence=args.baseline_confidence,
         candidate_confidence=args.candidate_confidence,
+        candidate_label=args.candidate_label,
     )
 
     runs: list[dict[str, object]] = []

@@ -5,6 +5,7 @@ import pytest
 from scripts.compare_person_tracking_videos import (
     build_tracking_only_config,
     discover_videos,
+    resolve_confidences,
     select_models,
     summarize_result,
 )
@@ -45,12 +46,39 @@ def test_selects_only_baseline_for_final_regression():
     assert models == (("baseline", "baseline.pt"),)
 
 
+def test_selects_custom_candidate_label():
+    models = select_models(
+        "baseline.pt",
+        "candidate.pt",
+        baseline_only=False,
+        candidate_label="crowdhuman_a",
+    )
+
+    assert models == (
+        ("baseline", "baseline.pt"),
+        ("crowdhuman_a", "candidate.pt"),
+    )
+
+
+def test_resolves_model_specific_confidences():
+    assert resolve_confidences(0.4, 0.3, 0.55) == (0.3, 0.55)
+    assert resolve_confidences(0.4, None, None) == (0.4, 0.4)
+
+
+@pytest.mark.parametrize("confidence", [0.0, 1.0])
+def test_rejects_invalid_model_specific_confidences(confidence):
+    with pytest.raises(ValueError, match="must be in"):
+        resolve_confidences(0.4, confidence, 0.5)
+
+
 def test_final_person_tracking_config_is_isolated():
     project_root = Path(__file__).resolve().parents[1]
     config = load_config(project_root / "configs" / "person_tracking_final.yaml")
 
-    assert config.detection.model_path == "yolo26n.pt"
-    assert config.detection.confidence == 0.3
+    assert config.detection.model_path == (
+        "runs/person_detection/crowdhuman_a/weights/best.pt"
+    )
+    assert config.detection.confidence == 0.55
     assert config.tracking.tracker_config == Path("configs/bytetrack_week6.yaml")
     assert config.tracking.continuity_enabled is False
     assert config.tracking.duplicate_suppression_enabled is False
@@ -94,9 +122,16 @@ def test_summarizes_tracking_proxies():
         },
     )
 
-    summary = summarize_result(result, "input.mp4", "candidate", "candidate.pt")
+    summary = summarize_result(
+        result,
+        "input.mp4",
+        "candidate",
+        "candidate.pt",
+        confidence=0.55,
+    )
 
     assert summary["observed_track_frames"] == 50
+    assert summary["confidence"] == 0.55
     assert summary["average_active_tracks"] == 0.5
     assert summary["track_churn_per_1000_observations"] == 40.0
     assert summary["tracks_with_gaps_percent"] == 50.0

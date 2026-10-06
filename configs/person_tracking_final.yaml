@@ -1,6 +1,6 @@
 detection:
-  model_path: yolo26n.pt
-  confidence: 0.30
+  model_path: runs/person_detection/crowdhuman_a/weights/best.pt
+  confidence: 0.55
   target_classes:
     - person
 

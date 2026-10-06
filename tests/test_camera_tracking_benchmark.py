@@ -86,6 +86,32 @@ def test_builds_locked_holdout_run_specs():
     ]
 
 
+def test_builds_run_specs_with_custom_candidate_label():
+    _, runs = build_run_specs(
+        baseline_model="baseline.pt",
+        candidate_model="candidate.pt",
+        confidences=[0.3],
+        baseline_confidence=0.3,
+        candidate_confidence=0.55,
+        candidate_label="crowdhuman_a",
+    )
+
+    assert runs[1] == ("crowdhuman_a", "candidate.pt", 0.55)
+
+
+@pytest.mark.parametrize("label", ["baseline", "../candidate", "candidate/test"])
+def test_rejects_unsafe_or_reserved_candidate_label(label):
+    with pytest.raises(ValueError, match="file-safe label"):
+        build_run_specs(
+            baseline_model="baseline.pt",
+            candidate_model="candidate.pt",
+            confidences=[0.3],
+            baseline_confidence=None,
+            candidate_confidence=None,
+            candidate_label=label,
+        )
+
+
 def test_requires_both_locked_confidences():
     with pytest.raises(ValueError, match="must be used together"):
         build_run_specs(

@@ -1,6 +1,6 @@
 # MOT17 Tracking Baseline
 
-## Setup
+## Historical Setup
 
 - Dataset: MOT17 train split
 - Variant: FRCNN image folders only; DPM and SDP contain the same source frames
@@ -17,9 +17,9 @@ MOTP, IDF1, identity switches, fragmentations, precision, and recall.
 
 The camera-1 and camera-3 results below were regenerated after the evaluator was corrected.
 Local validation against TrackEval commit `12c8791b303e0a0b50f753af204249e622d0281a` matched every reported
-metric and count. The earlier MOT17 tables are retained as historical experiment notes, but
-were produced before that correction. The MOT17 ground truth is not currently present in the
-workspace, so those tables must not be used as final benchmark evidence until they are rerun.
+metric and count. The MOT17 tables before Experiment B are retained as historical experiment
+notes because they predate that correction. A fresh locked baseline/candidate gate using the
+restored MOT17 ground truth is reported under Experiment B and is the current public evidence.
 
 ## Aggregate Results
 
@@ -181,10 +181,176 @@ baseline and 0.40 for MOT17 A. No threshold was selected using camera 3 results.
 | MOT17 A | 0.40 | 54.872 | **50.644** | 59.797 | 54.114 | 73.444 | 71.886 | **90.051** | 79 |
 
 MOT17 A recovers substantially more people, but its 3,869 false positives versus 364 for the
-baseline reduce MOTA and identity quality. Camera 3 therefore confirms the camera-1 model
-selection: retain `yolo26n.pt`. The more complex `2.mp4` remains unannotated, so these results
-must not be presented as validation for that scene. The production configuration is not
-modified automatically.
+baseline reduce MOTA and identity quality. At this stage, camera 3 confirmed the camera-1
+model selection: retain `yolo26n.pt`. The later CrowdHuman experiment below supersedes that
+candidate comparison. The more complex `2.mp4` remains unannotated, so neither experiment
+may be presented as validation for that scene. The production configuration is not modified
+automatically.
+
+## Experiment B: CrowdHuman Fine-Tuning
+
+On 2026-10-04, YOLO26n was fine-tuned for five epochs on the locally available CrowdHuman
+training split. Conversion produced 15,000 training images and 4,368 of 4,370 validation
+images with 439,000 full-body boxes. It excluded 127,455 ignored boxes and clipped 68,002
+boxes to image bounds. Two validation images were absent from the source archive.
+
+Training used 640-pixel images, batch size 8, AdamW with initial learning rate 0.0005,
+cosine decay, AMP, seed 42, deterministic mode, and a maximum of 500 detections per image.
+The fifth epoch was resumed from `last.pt` after the original terminal command timed out;
+the saved optimizer state preserved the run. The selected checkpoint is
+`runs/person_detection/crowdhuman_a/weights/best.pt`.
+
+| Detector | Precision | Recall | mAP50 | mAP50-95 |
+| --- | ---: | ---: | ---: | ---: |
+| Pretrained YOLO26n | 0.651 | 0.430 | 0.491 | 0.245 |
+| CrowdHuman experiment B | **0.813** | **0.656** | **0.773** | **0.461** |
+| Absolute change | +0.162 | +0.226 | +0.282 | +0.216 |
+
+The YOLO-native metrics are supplemented by an ignore-aware evaluation using the upstream
+`megvii-model/CrowdDetection` implementation at commit
+`9786f58869a55af3e0b51fc78f8638a825dae4a2`. The adapter evaluates full-body boxes against
+the original CrowdHuman ODGT annotations using Caltech matching. It preserves all 4,370
+validation records; the two missing source images receive empty detection lists rather than
+being dropped.
+
+| Detector | AP | Log-average miss rate (lower is better) |
+| --- | ---: | ---: |
+| Pretrained YOLO26n | 0.440238 | 0.906192 |
+| CrowdHuman experiment B | **0.810561** | **0.597033** |
+
+The candidate raises AP by 0.370323 and lowers miss rate by 0.309159 under this protocol.
+
+Candidate confidence was calibrated only on camera 1. The existing baseline remained locked
+at 0.30, while the candidate sweep was extended after its initial optimum occurred at the
+0.50 boundary.
+
+| Model | Confidence | HOTA | MOTA | IDF1 | Precision | Recall | IDSW |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pretrained | 0.30 | 40.905 | **38.789** | 49.548 | **94.021** | 41.782 | **78** |
+| CrowdHuman B | 0.30 | 34.754 | 0.323 | 35.976 | 50.791 | **63.609** | 385 |
+| CrowdHuman B | 0.40 | 42.027 | 25.789 | 47.978 | 64.531 | 59.643 | 249 |
+| CrowdHuman B | 0.50 | 43.097 | 36.632 | 52.724 | 76.882 | 53.171 | 128 |
+| CrowdHuman B | 0.55 | **43.946** | 37.502 | **54.621** | 81.326 | 49.132 | 81 |
+| CrowdHuman B | 0.60 | 42.180 | 36.692 | 53.495 | 84.964 | 44.843 | 50 |
+| CrowdHuman B | 0.65 | 40.483 | 34.858 | 51.767 | 89.385 | 39.706 | 31 |
+| CrowdHuman B | 0.70 | 37.285 | 31.370 | 48.062 | 93.599 | 33.751 | 17 |
+
+Confidence 0.55 was selected by the benchmark's predefined HOTA, then IDF1, then MOTA
+ordering. It improves camera-1 HOTA by 3.041 and IDF1 by 5.073 points, but MOTA is 1.287
+points lower and identity switches increase from 78 to 81. This remaining camera-1
+false-positive trade-off is why the candidate is not promoted from calibration alone.
+
+Camera 3 was then evaluated once with the independently selected candidate confidence:
+
+| Model | Confidence | HOTA | DetA | AssA | MOTA | IDF1 | Precision | Recall | IDSW |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pretrained | 0.30 | 57.349 | 50.171 | 65.805 | 63.790 | 77.504 | **95.304** | 67.240 | **15** |
+| CrowdHuman B | 0.55 | **65.696** | **62.408** | **69.315** | **77.681** | **86.777** | 89.496 | **88.176** | 16 |
+
+The candidate improves holdout HOTA by 8.347, MOTA by 13.891, IDF1 by 9.273, and recall by
+20.936 points. False negatives fall from 3,599 to 1,299 and fragmentations from 168 to 135;
+false positives rise from 364 to 1,137 and identity switches rise by one. Both selected
+candidate predictions and the locked camera-3 baseline match TrackEval commit
+`12c8791b303e0a0b50f753af204249e622d0281a` for every reported metric and count.
+
+The same locked models and thresholds were then run on all seven MOT17 train/FRCNN sequences:
+
+| Model | Confidence | HOTA | DetA | AssA | MOTA | IDF1 | IDSW | E2E FPS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pretrained YOLO26n | 0.30 | 33.38 | 25.70 | 43.75 | 28.03 | 37.40 | 467 | 21.17 |
+| CrowdHuman B | 0.55 | **39.62** | **33.08** | **47.91** | **39.46** | **48.79** | **351** | **36.71** |
+
+All fourteen model/sequence prediction files match the pinned TrackEval checkout for every
+reported metric and count. The candidate improves HOTA by 6.24, MOTA by 11.43, and IDF1 by
+11.39 points while reducing identity switches by 116.
+
+Camera 2 has no ground truth, so it was processed only as a locked shadow comparison:
+
+| Model | Confidence | Tracks | Avg active | Churn/1k observations | Max gap | E2E FPS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pretrained YOLO26n | 0.30 | 59 | 10.415 | 16.231 | 72 | 13.769 |
+| CrowdHuman B | 0.55 | 40 | 12.003 | 9.549 | 52 | 17.069 |
+
+These are runtime diagnostics, not accuracy metrics. The full 13.96-second side-by-side
+video passed the manual checks in [camera2_shadow_review.md](camera2_shadow_review.md). The
+reviewer accepted one residual ID transfer at approximately 00:06-00:07 while the people were
+very small in the frame. Experiment B is the first detector to pass the annotated camera,
+public MOT17, ignore-aware CrowdHuman, and manual shadow gates. It is now selected in
+`configs/person_tracking_final.yaml`.
+
+Reproduce the local experiment with:
+
+```powershell
+python -m scripts.prepare_person_dataset `
+  --sources crowdhuman `
+  --crowdhuman-root datasets/person_tracking/crownhuman `
+  --output-root datasets/yolo `
+  --link-mode hardlink
+
+yolo detect train `
+  model=yolo26n.pt `
+  data=datasets/yolo/crowdhuman/data.yaml `
+  epochs=5 imgsz=640 batch=8 device=0 workers=0 `
+  optimizer=AdamW lr0=0.0005 lrf=0.1 cos_lr=True `
+  warmup_epochs=1 patience=3 close_mosaic=2 `
+  seed=42 deterministic=True amp=True max_det=500 `
+  project=runs/person_detection name=crowdhuman_a
+
+python -m scripts.evaluate_camera_tracking `
+  --video datasets/person_tracking/camera/1.mp4 `
+  --ground-truth datasets/person_tracking/camera_ground_truth/camera-1/gt/gt.txt `
+  --config configs/person_tracking_final.yaml `
+  --output-dir data/outputs/crowdhuman_a/camera-1-calibration `
+  --candidate-model runs/person_detection/crowdhuman_a/weights/best.pt `
+  --candidate-label crowdhuman_a `
+  --confidences 0.30 0.40 0.50 0.55 0.60 0.65 0.70
+
+python -m scripts.evaluate_camera_tracking `
+  --video datasets/person_tracking/camera/3.mp4 `
+  --ground-truth datasets/person_tracking/camera_ground_truth/camera-3/gt/gt.txt `
+  --config configs/person_tracking_final.yaml `
+  --output-dir data/outputs/crowdhuman_a/camera-3-holdout `
+  --candidate-model runs/person_detection/crowdhuman_a/weights/best.pt `
+  --candidate-label crowdhuman_a `
+  --baseline-confidence 0.30 `
+  --candidate-confidence 0.55
+
+python -m scripts.evaluate_mot17 `
+  --dataset datasets/MOT17 `
+  --config configs/person_tracking_final.yaml `
+  --output-dir data/mot17_benchmark/crowdhuman_gate/crowdhuman_a_conf_055 `
+  --variant FRCNN `
+  --conf 0.55 `
+  --model runs/person_detection/crowdhuman_a/weights/best.pt `
+  --disable-continuity
+
+python -m scripts.compare_person_tracking_videos `
+  --video-dir datasets/person_tracking/camera `
+  --videos 2.mp4 `
+  --config configs/person_tracking_final.yaml `
+  --output-dir data/outputs/crowdhuman_a/camera-2-shadow `
+  --baseline-model yolo26n.pt `
+  --candidate-model runs/person_detection/crowdhuman_a/weights/best.pt `
+  --candidate-label crowdhuman_a `
+  --baseline-confidence 0.30 `
+  --candidate-confidence 0.55
+
+yolo detect val `
+  model=runs/person_detection/crowdhuman_a/weights/best.pt `
+  data=datasets/yolo/crowdhuman/data.yaml `
+  imgsz=640 batch=8 device=0 workers=0 conf=0.001 max_det=500 save_json=True `
+  project=runs/person_detection name=crowdhuman_official_candidate
+
+git clone https://github.com/megvii-model/CrowdDetection.git C:/path/to/CrowdDetection
+git -C C:/path/to/CrowdDetection checkout 9786f58869a55af3e0b51fc78f8638a825dae4a2
+
+python -m scripts.evaluate_crowdhuman `
+  --ground-truth datasets/person_tracking/crownhuman/annotation_val.odgt `
+  --predictions runs/person_detection/crowdhuman_official_candidate/predictions.json `
+  --images-dir datasets/person_tracking/crownhuman/CrowdHuman_val/Images `
+  --evaluator-root C:/path/to/CrowdDetection `
+  --output-dir data/outputs/crowdhuman_a/official-evaluation/crowdhuman_a
+```
 
 Each regenerated camera report records the SHA-256 hashes of the video, ground truth,
 predictions, configuration, tracker configuration, tracking implementation, evaluator,
@@ -194,12 +360,15 @@ per-prediction TrackEval comparisons are stored under each report directory's `v
 folder and require an empty `differences` object to pass. A sanitized summary of the local
 results and artifact hashes is tracked in [the evaluation evidence manifest](evaluation_evidence.md).
 
-## Final Person-Tracking Regression
+## Production Selection and Historical Regression
 
-`configs/person_tracking_final.yaml` freezes the selected detector at confidence 0.30 with
-the evaluated ByteTrack parameters. It is intentionally separate from `configs/week6.yaml`.
-Camera-specific events, continuity, and duplicate suppression are disabled because no shared
-line or zone geometry is valid across the three videos.
+`configs/person_tracking_final.yaml` now freezes the selected CrowdHuman detector at
+confidence 0.55 with the evaluated ByteTrack parameters. It is intentionally separate from
+`configs/week6.yaml`. Camera-specific events, continuity, and duplicate suppression are
+disabled because no shared line or zone geometry is valid across the three videos.
+
+The table below preserves the earlier pretrained-model regression for historical comparison;
+the current production candidate results are reported under Experiment B above.
 
 | Video | Frames | Avg active tracks | Total tracks | Churn/1k observations | Max gap | End-to-end FPS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -324,7 +493,7 @@ python -m scripts.compare_person_tracking_videos `
   --video-dir datasets/person_tracking/camera `
   --config configs/person_tracking_final.yaml `
   --output-dir data/outputs/person_tracking_final `
-  --baseline-model yolo26n.pt `
-  --conf 0.30 `
+  --baseline-model runs/person_detection/crowdhuman_a/weights/best.pt `
+  --conf 0.55 `
   --baseline-only
 ```

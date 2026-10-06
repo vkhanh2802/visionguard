@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 from pathlib import Path
 
 from src.config import AppConfig, load_config
@@ -39,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         help="Candidate detector checkpoint",
     )
     parser.add_argument(
+        "--candidate-label",
+        default="mot17_a",
+        help="Label used for the candidate in reports and output file names",
+    )
+    parser.add_argument(
         "--baseline-only",
         action="store_true",
         help="Run only the baseline model for final regression",
@@ -47,7 +53,17 @@ def parse_args() -> argparse.Namespace:
         "--conf",
         type=float,
         default=0.4,
-        help="Detection confidence used by both models",
+        help="Fallback detection confidence used by both models",
+    )
+    parser.add_argument(
+        "--baseline-confidence",
+        type=float,
+        help="Optional baseline confidence override",
+    )
+    parser.add_argument(
+        "--candidate-confidence",
+        type=float,
+        help="Optional candidate confidence override",
     )
     parser.add_argument(
         "--videos",
@@ -78,11 +94,33 @@ def select_models(
     baseline_model: str,
     candidate_model: str,
     baseline_only: bool,
+    candidate_label: str = "mot17_a",
 ) -> tuple[tuple[str, str], ...]:
+    if (
+        candidate_label == "baseline"
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", candidate_label) is None
+    ):
+        raise ValueError(
+            "--candidate-label must be a file-safe label other than 'baseline'"
+        )
     models = [("baseline", baseline_model)]
     if not baseline_only:
-        models.append(("mot17_a", candidate_model))
+        models.append((candidate_label, candidate_model))
     return tuple(models)
+
+
+def resolve_confidences(
+    shared_confidence: float,
+    baseline_confidence: float | None,
+    candidate_confidence: float | None,
+) -> tuple[float, float]:
+    baseline = baseline_confidence if baseline_confidence is not None else shared_confidence
+    candidate = (
+        candidate_confidence if candidate_confidence is not None else shared_confidence
+    )
+    if any(not 0 < confidence < 1 for confidence in (baseline, candidate)):
+        raise ValueError("Every confidence must be in (0, 1)")
+    return baseline, candidate
 
 
 def build_tracking_only_config(
@@ -110,6 +148,7 @@ def summarize_result(
     video_name: str,
     model_label: str,
     model_path: str,
+    confidence: float,
 ) -> dict[str, object]:
     diagnostics = result.tracking_diagnostics
     timing = diagnostics.get("timing", {})
@@ -124,6 +163,7 @@ def summarize_result(
         "video": video_name,
         "model": model_label,
         "model_path": model_path,
+        "confidence": confidence,
         "output_path": str(result.output_path),
         "frames": result.processed_frames,
         "source_fps": round(result.source_fps, 3),
@@ -168,14 +208,15 @@ def write_report(output_dir: Path, report: dict[str, object]) -> None:
         ),
         "The values below are runtime diagnostics and do not use ground truth. "
         "See the camera benchmark reports for accuracy metrics.\n\n",
-        "| Video | Model | Frames | Avg active | Tracks | Churn/1k obs | "
+        "| Video | Model | Conf | Frames | Avg active | Tracks | Churn/1k obs | "
         "Tracks with gaps | Max gap | Tracking FPS | Core FPS | E2E FPS |\n",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
         "---: | ---: |\n",
     ]
     for run in report["runs"]:
         rows.append(
-            f"| {run['video']} | {run['model']} | {run['frames']} | "
+            f"| {run['video']} | {run['model']} | {run['confidence']:.2f} | "
+            f"{run['frames']} | "
             f"{run['average_active_tracks']:.3f} | {run['total_tracks']} | "
             f"{run['track_churn_per_1000_observations']:.3f} | "
             f"{run['tracks_with_gaps']} | {run['max_gap_frames']} | "
@@ -192,21 +233,32 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     videos = discover_videos(video_dir, args.videos)
     base_config = load_config(args.config)
+    baseline_confidence, candidate_confidence = resolve_confidences(
+        shared_confidence=args.conf,
+        baseline_confidence=args.baseline_confidence,
+        candidate_confidence=args.candidate_confidence,
+    )
     models = select_models(
         baseline_model=args.baseline_model,
         candidate_model=args.candidate_model,
         baseline_only=args.baseline_only,
+        candidate_label=args.candidate_label,
     )
+    confidence_by_model = {
+        "baseline": baseline_confidence,
+        args.candidate_label: candidate_confidence,
+    }
 
     pipelines: dict[str, VideoPipeline] = {}
     runs: list[dict[str, object]] = []
     for video_path in videos:
         for model_label, model_path in models:
+            confidence = confidence_by_model[model_label]
             output_path = output_dir / f"{video_path.stem}_{model_label}.mp4"
             config = build_tracking_only_config(
                 base_config,
                 model_path=model_path,
-                confidence=args.conf,
+                confidence=confidence,
             )
             print(f"Processing {video_path.name} with {model_label}...")
             pipeline = pipelines.setdefault(model_label, VideoPipeline(config))
@@ -216,6 +268,7 @@ def main() -> None:
                 video_name=video_path.name,
                 model_label=model_label,
                 model_path=model_path,
+                confidence=confidence,
             )
             runs.append(summary)
             print(
@@ -227,7 +280,13 @@ def main() -> None:
     report: dict[str, object] = {
         "video_dir": str(video_dir),
         "base_config": str(args.config),
-        "confidence": args.conf,
+        "confidence": (
+            baseline_confidence
+            if baseline_confidence == candidate_confidence
+            else None
+        ),
+        "baseline_confidence": baseline_confidence,
+        "candidate_confidence": candidate_confidence,
         "continuity_enabled": False,
         "duplicate_suppression_enabled": False,
         "events_enabled": False,

@@ -20,7 +20,7 @@ a model notebook.
 | Service | FastAPI, Redis/RQ worker, SQLite lifecycle and event persistence |
 | UI | React/TypeScript run submission, polling, analytics, diagnostics, downloads |
 | Reliability | Per-run artifacts, readiness checks, bounded async encoding, failure propagation |
-| Evaluation | Custom MOT evaluator locally validated against TrackEval on eight camera prediction files |
+| Evaluation | Custom MOT evaluator locally validated against TrackEval on 24 prediction files |
 | Performance | Stage timing, async writer, FFmpeg H.264 NVENC, controlled throughput comparisons |
 
 ## Architecture
@@ -51,20 +51,44 @@ confidence selected on camera 1. Both sequences have frame-level CVAT/MOT annota
 
 | Sequence | Model | Confidence | HOTA | MOTA | IDF1 | Precision | Recall | IDSW |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Camera 1 calibration | Pretrained YOLO26n | 0.30 | **40.905** | **38.789** | **49.548** | **94.021** | 41.782 | **78** |
+| Camera 1 calibration | Pretrained YOLO26n | 0.30 | 40.905 | **38.789** | 49.548 | **94.021** | 41.782 | **78** |
 | Camera 1 calibration | MOT17 fine-tuned | 0.40 | 30.526 | 12.212 | 34.666 | 61.638 | 34.573 | 196 |
-| Camera 3 locked holdout | Pretrained YOLO26n | 0.30 | **57.349** | **63.790** | **77.504** | **95.304** | 67.240 | **15** |
+| Camera 1 calibration | CrowdHuman fine-tuned | 0.55 | **43.946** | 37.502 | **54.621** | 81.326 | **49.132** | 81 |
+| Camera 3 locked holdout | Pretrained YOLO26n | 0.30 | 57.349 | 63.790 | 77.504 | **95.304** | 67.240 | **15** |
 | Camera 3 locked holdout | MOT17 fine-tuned | 0.40 | 54.872 | 54.114 | 73.444 | 71.886 | **90.051** | 79 |
+| Camera 3 locked holdout | CrowdHuman fine-tuned | 0.55 | **65.696** | **77.681** | **86.777** | 89.496 | 88.176 | 16 |
+
+The CrowdHuman threshold was selected on camera 1 before camera 3 was evaluated. It also
+passed the locked public MOT17 gate and the ignore-aware CrowdHuman detector evaluation:
+
+| Evaluation | Model | Confidence | HOTA | MOTA | IDF1 | IDSW |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| MOT17 train/FRCNN, 5,316 frames | Pretrained YOLO26n | 0.30 | 33.38 | 28.03 | 37.40 | 467 |
+| MOT17 train/FRCNN, 5,316 frames | CrowdHuman fine-tuned | 0.55 | **39.62** | **39.46** | **48.79** | **351** |
+
+| CrowdHuman full-body evaluation | AP | mMR (lower is better) |
+| --- | ---: | ---: |
+| Pretrained YOLO26n | 0.440238 | 0.906192 |
+| CrowdHuman fine-tuned | **0.810561** | **0.597033** |
+
+The documented camera-2 shadow review accepted the candidate, and
+`configs/person_tracking_final.yaml` now uses the CrowdHuman checkpoint at confidence 0.55.
+The reviewer accepted one residual ID transfer at approximately 00:06-00:07 while the people
+were very small in the frame. This manual review is a deployment safeguard, not a substitute
+for ground-truth accuracy measurement.
 
 Local validation shows that the evaluator matches TrackEval commit
 `12c8791b303e0a0b50f753af204249e622d0281a` for HOTA, DetA, AssA, LocA, MOTA,
-MOTP, IDF1, TP, FP, FN, ID switches, and fragmentations on all eight regenerated
-prediction files. Reports store checkpoint/config/input SHA-256 hashes and environment
-metadata. The older MOT17 tables in [the experiment log](docs/mot17_baseline.md) are
-historical until the removed MOT17 ground truth is restored and those results are rerun.
+MOTP, IDF1, TP, FP, FN, ID switches, and fragmentations on all 24 checked prediction
+files: ten camera calibration/holdout files and fourteen public MOT17 sequence files.
+Reports store checkpoint/config/input SHA-256 hashes and environment metadata. The older
+MOT17 tables in [the experiment log](docs/mot17_baseline.md) remain historical, while the
+locked public gate above was freshly rerun with restored ground truth.
 The sanitized [evaluation evidence manifest](docs/evaluation_evidence.md) records the
 camera metrics, prediction hashes, artifact hashes, and validation scope without bundling
-private media or model weights.
+private media or model weights. The completed
+[camera-2 shadow review](docs/camera2_shadow_review.md) records the accepted promotion and
+its known residual issue.
 
 ## Performance
 
@@ -205,9 +229,12 @@ positive. This is a bounded position/time continuity heuristic, not appearance-b
 person re-identification; tune it per camera to avoid merging nearby people.
 
 `configs/person_tracking_final.yaml` is the tracking-only configuration selected by the
-camera ground-truth benchmark. It uses asynchronous FFmpeg H.264 NVENC output. This mode
-requires `ffmpeg` on `PATH` with the `h264_nvenc` encoder; the default output backend remains
-portable synchronous OpenCV. The writer queue is bounded by
+camera ground-truth benchmark, public MOT17 gate, CrowdHuman evaluation, and accepted
+camera-2 shadow review. It uses `runs/person_detection/crowdhuman_a/weights/best.pt` at
+confidence 0.55. Model weights are intentionally not bundled, so that checkpoint must be
+available locally. The config uses asynchronous FFmpeg H.264 NVENC output. This mode requires
+`ffmpeg` on `PATH` with the `h264_nvenc` encoder; the default output backend remains portable
+synchronous OpenCV. The writer queue is bounded by
 `output.writer_queue_size` to prevent unbounded frame memory growth.
 
 Week 6 also enables conservative track continuity. A replacement ID must remain
