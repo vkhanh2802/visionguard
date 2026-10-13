@@ -1,22 +1,41 @@
-
+# Python caches and development environments
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
 
-data/videos/*
-data/outputs/*
-data/*.db
-
-*.pt
-*.onnx
-runs/
-
-.vscode/
-.idea/
-
-web/node_modules/
-web/dist/
-
+# Datasets, media, runtime artifacts and model weights
+/data/
+/datasets/
+/runs/
+/weights/
 /MOT17/
 /MOT17*.zip
-/data/mot17_benchmark/
-/datasets/
+*.pt
+*.onnx
+*.db
+*.db-shm
+*.db-wal
+
+# Local-only application and documentation archives
+/.local/
+/web/
+/Dockerfile
+/.dockerignore
+/compose.app.yaml
+/compose.gpu.yaml
+/scripts/smoke_web_app.py
+/src/api/video_uploads.py
+/tests/test_video_upload_api.py
+
+# Keep the public documentation set compact
+/docs/*
+!/docs/architecture.md
+!/docs/benchmark.md
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
