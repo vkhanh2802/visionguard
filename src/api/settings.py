@@ -5,9 +5,9 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ApiSettings:
-    source_root: Path = Path("C:/VisionGuard/videos")
-    output_root: Path = Path("C:/VisionGuard/outputs")
-    config_root: Path = Path("C:/VisionGuard/configs")
+    source_root: Path = Path("VisionGuard/videos")
+    output_root: Path = Path("VisionGuard/outputs")
+    config_root: Path = Path("VisionGuard/configs")
     allowed_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
@@ -23,13 +23,13 @@ class ApiSettings:
         )
         return cls(
             source_root=Path(
-                os.environ.get("VISIONGUARD_SOURCE_ROOT", "C:/VisionGuard/videos")
+                os.environ.get("VISIONGUARD_SOURCE_ROOT", "VisionGuard/videos")
             ),
             output_root=Path(
-                os.environ.get("VISIONGUARD_OUTPUT_ROOT", "C:/VisionGuard/outputs")
+                os.environ.get("VISIONGUARD_OUTPUT_ROOT", "VisionGuard/outputs")
             ),
             config_root=Path(
-                os.environ.get("VISIONGUARD_CONFIG_ROOT", "C:/VisionGuard/configs")
+                os.environ.get("VISIONGUARD_CONFIG_ROOT", "VisionGuard/configs")
             ),
             allowed_origins=tuple(
                 origin.strip()
